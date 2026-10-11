@@ -12,6 +12,7 @@ import { chmod, copyFile, cp, lstat, mkdir, readFile, readdir, realpath, rm, wri
 import { tmpdir } from 'node:os'
 import { basename, dirname, extname, join, resolve, sep } from 'node:path'
 import { parseArgs } from 'node:util'
+import { normalizeDeployedBuildRules } from './normalize-deployed-build-rules.ts'
 import { restoreDeployedDependencies } from './restore-deployed-dependencies.ts'
 import { resolveLinuxNodePtyAddon, resolveWindowsNodePtyAddons } from './build-exe-for-python-sdk-native-pty.ts'
 import { copyOfficeSidecar, OFFICE_ASSET_IGNORES } from './build-exe-for-python-sdk-office.ts'
@@ -32,7 +33,7 @@ const OUT_DIR = 'dist-exe'
 const PYTHON_RUNTIME_DIR = 'python/sdk-runtime/src/deepseek_harness_runtime/runtime'
 /** The deployed closure doubles as the node-mode carrier. */
 const PYTHON_NODE_SUBDIR = 'node'
-/** Legacy deploy may hoist peer-specialized workspace packages back here. */
+/** Original installed workspace used to complete peer-specialized dependency graphs. */
 const DEPLOY_SOURCE = 'python/sdk-runtime'
 /** Documentation excluded from the generated runtime directory. */
 const DEPLOY_ONLY_DOCS = ['README.md', 'README.zh.md', 'README.i18n.yaml']
@@ -301,16 +302,20 @@ class SingleExeBuild {
       '--filter',
       DEPLOY_ROOT_PACKAGE,
       'deploy',
-      '--legacy',
       '--prod',
       // Production deployment omits workspace tooling such as Electron's patched signer.
       '--config.allow-unused-patches=true',
       '--config.node-linker=hoisted',
-      '--config.auto-install-peers=false',
+      '--config.force-legacy-deploy=false',
+      '--config.inject-workspace-packages=true',
+      '--ignore-scripts',
       '--config.link-workspace-packages=true',
       this.staging,
     ])
-    await this.restoreLegacyHoists()
+    if (this.cli.dryRun) console.log('build-exe-for-python-sdk: [dry-run] normalize staged local-file build permissions')
+    else await normalizeDeployedBuildRules(this.staging, root)
+    await this.runPnpm('deployed lifecycle scripts', ['--dir', this.staging, 'rebuild', '--pending', '--config.node-linker=hoisted'])
+    await this.restoreInstalledDependencies()
     await this.materializeStagedLinks()
     if (this.cli.dryRun) {
       for (const name of DEPLOY_ONLY_DOCS) console.log(`build-exe-for-python-sdk: [dry-run] rm -f ${join(this.staging, name)}`)
@@ -319,15 +324,15 @@ class SingleExeBuild {
     }
   }
 
-  /** Restore every production dependency omitted by pnpm's legacy deploy hoister. */
-  private async restoreLegacyHoists(): Promise<void> {
+  /** Restore production dependencies while preserving installed package identities. */
+  private async restoreInstalledDependencies(): Promise<void> {
     if (this.cli.dryRun) {
-      console.log('build-exe-for-python-sdk: [dry-run] restore production dependency graph omitted by legacy deploy')
+      console.log('build-exe-for-python-sdk: [dry-run] restore installed production dependency graph')
       return
     }
     const restored = await restoreDeployedDependencies(this.staging, resolve(root, DEPLOY_SOURCE))
     if (restored.length > 0) {
-      console.log(`build-exe-for-python-sdk: restored legacy deploy hoists: ${restored.join(', ')}`)
+      console.log(`build-exe-for-python-sdk: restored deployed dependencies: ${restored.join(', ')}`)
     }
   }
 

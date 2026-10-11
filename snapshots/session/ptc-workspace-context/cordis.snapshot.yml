@@ -27,6 +27,8 @@
   name: '@deepseek-ai/dsh-agent-instructions'
   config:
     maxBytes: 65536
+    projectRootMarkers:
+      - .dsh-project
 
 - id: tools
   name: '@deepseek-ai/dsh-tools'

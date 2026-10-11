@@ -9,7 +9,10 @@ import { basename, delimiter, dirname, isAbsolute, join, relative, sep } from 'n
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import ts from 'typescript'
-import { SESSION_FORMAT_VERSION } from '@deepseek-ai/dsh-session'
+import { SESSION_FORMAT_VERSION, Session, SessionId } from '@deepseek-ai/dsh-session'
+import { Context } from '@deepseek-ai/cordis'
+import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
+import TokenMeter from '@deepseek-ai/dsh-token-meter'
 import { releasedV0SessionFormatCodec } from '@deepseek-ai/dsh-session-format-v0-to-v1'
 import type { SessionFormatEvent, SessionFormatMigrationContext } from '@deepseek-ai/dsh-session-format'
 import { assertWorkspaceOutsideTemp, outsideTempWorkspaceParent } from '../../scripts/snapshot-workspace-parent.ts'
@@ -806,6 +809,41 @@ async function verifyHeaders(scenario: HeadlessScenario, actualLogs: readonly Se
   }
 }
 
+/** Verify that output reservation triggers one compaction and its summary relieves pressure. */
+async function verifyCompactionBudget(content: string): Promise<void> {
+  const events = parseSessionLog(content)
+  const start = events.findIndex(event => event.type === 'compaction/start')
+  const end = events.findIndex(event => event.type === 'compaction/end')
+  expect(start).toBeGreaterThan(0)
+  expect(end).toBeGreaterThan(start)
+  expect(events.filter(event => event.type === 'compaction/start')).toHaveLength(1)
+  const request = events.find(event => event.type === 'request/context')
+  const header = events.find(event => event.type === 'request/header')
+  if (request?.type !== 'request/context' || header?.type !== 'request/header') {
+    throw new Error('compaction budget fixture must log its routed request context and header')
+  }
+  const contextWindow = request.data.contextWindow
+  const reserved = header.data.header.config.maxTokens
+  if (contextWindow === undefined || reserved === undefined) throw new Error('compaction budget fixture requires explicit token limits')
+  const headroom = 1800
+  const withoutReservation = Math.floor(Math.min(contextWindow * 0.8, contextWindow - headroom))
+  const threshold = Math.floor(Math.min(contextWindow * 0.8, contextWindow - headroom - reserved))
+  const ctx = new Context()
+  const projections = await ctx.plugin(SessionProjectionRegistry)
+  const meterFiber = await ctx.plugin(TokenMeter)
+  const meter = ctx.tokenMeter
+  try {
+    const before = meter.measure(Session.create(SessionId('before-compaction'), events.slice(0, start))).totalTokens
+    const after = meter.measure(Session.create(SessionId('after-compaction'), events.slice(0, end + 1))).totalTokens
+    expect(before, 'reserved output must cause compaction').toBeGreaterThanOrEqual(threshold)
+    expect(after, 'one summary must relieve pressure').toBeLessThan(threshold)
+    expect(before, 'negative control: without output reservation no compaction is due').toBeLessThan(withoutReservation)
+  } finally {
+    await meterFiber.dispose()
+    await projections.dispose()
+  }
+}
+
 describe('headless recorded-session snapshots', () => {
   it('gives every composition and header class exactly one current-writer pin', () => {
     for (const scenario of scenarios) {
@@ -1207,6 +1245,9 @@ describe('headless recorded-session snapshots', () => {
               await verifyProviderCwdResume(
                 scenario, cwd, actualLogs, patches, model, join(scenario.dir, fixtureFiles[0] as string), task,
               )
+            }
+            if (scenario.name === 'compaction-output-reserve' || scenario.name === 'compaction-summary-headroom') {
+              await verifyCompactionBudget(actualLogs[0]!.content)
             }
             if (scenario.name === 'background-confinement-failure') {
               await verifyBackgroundConfinementFailure(actualLogs[0]!.content, cwd)
