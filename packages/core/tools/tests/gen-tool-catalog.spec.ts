@@ -29,7 +29,7 @@ describe('gen-tool-catalog collectToolCatalog', () => {
       'ask_user_question', 'bash', 'bash', 'cordis_inspect_list',
       'cordis_inspect_query',
       'create_goal', 'edit', 'exit_plan_mode', 'get_goal', 'glob', 'grep',
-      'interrupt_agent', 'interrupt_agent', 'job_kill', 'job_list', 'job_output',
+      'interrupt_agent', 'interrupt_agent', 'job_kill', 'job_list', 'job_output', 'job_stop_all',
       'list_agents', 'list_agents', 'list_mcp_resource_templates', 'list_mcp_resources',
       'list_subagent_models', 'load_workspace_dependencies', 'lsp', 'plugin_manager', 'present', 'pwsh', 'pwsh', 'ralph',
       'read', 'read_image', 'read_mcp_resource',

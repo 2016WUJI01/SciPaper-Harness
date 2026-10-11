@@ -84,6 +84,7 @@ const WORKSPACES: WorkspaceView[] = [
 
 /** What the tree reads, which a test may change between renders. */
 interface World {
+  researchHome?: string
   drafts?: Record<string, { text: string; attachmentCount: number }>
   projects?: ResearchProject[] | null
   sessions?: SessionSummary[]
@@ -111,7 +112,10 @@ function propsOf(w: World, face: ReturnType<typeof faceOf>, store: ReturnType<Re
   const view: ResearchView = {
     snapshot: projects === null
       ? null
-      : { projects, preferences: w.showExamples === undefined ? {} : { showExamples: w.showExamples }, components: [], modes: MODES },
+      : {
+        projects, preferences: w.showExamples === undefined ? {} : { showExamples: w.showExamples },
+        components: [], modes: MODES, ...(w.researchHome === undefined ? {} : { researchHome: w.researchHome }),
+      },
     tasks: [],
   }
   return {
@@ -1085,4 +1089,56 @@ describe('the collapsed rail', () => {
     await act(async () => { await vi.advanceTimersByTimeAsync(300) })
     expect(tree.queryByRole('textbox')).toBeNull()
   })
+})
+
+it('starts conversations from row controls without activating or collapsing their parent rows', () => {
+  const tree = mount({ current: 's-cite' })
+  fireEvent.click(within(row(R(sparse))).getByRole('button', { name: t('treeAddConversationIn', { title: sparse.title }) }))
+  expect(tree.face.startSession).toHaveBeenCalledExactlyOnceWith(sparse.workspaceId)
+  expect(tree.face.openSession).not.toHaveBeenCalled()
+  expect(row(R(sparse)).getAttribute('aria-expanded')).toBe('true')
+  fireEvent.click(tree.getByRole('button', { name: zh.projectOrdinary }))
+  expect(tree.face.startOrdinary).toHaveBeenCalledOnce()
+  expect(row('group:loose').getAttribute('aria-expanded')).toBe('true')
+})
+
+it('keeps an empty retained draft identifiable while its draft content is being cleared', () => {
+  mount({ projects: [], sessions: [session('clearing', '/elsewhere', { blank: true })],
+    drafts: { clearing: { text: '  ', attachmentCount: 0 } }, workspaces: [] })
+  expect(row('conversation:clearing').textContent).toBe(zh.treeDraftConversation)
+})
+
+it('opens explicit project creation from the header and keeps the form while the snapshot refreshes', () => {
+  const tree = mount({ researchHome: '/home/research' })
+  fireEvent.click(tree.getByRole('button', { name: zh.projectNew }))
+  expect(tree.getByRole('dialog').getAttribute('aria-label')).toBe(zh.projectNew)
+  expect(tree.getByLabelText(zh.projectLocation)).toHaveProperty('value', '/home/research/')
+  tree.update({ projects: null })
+  expect(tree.getByLabelText(zh.projectLocation)).toHaveProperty('value', '/')
+  fireEvent.click(tree.getByRole('button', { name: zh.cancel }))
+  expect(tree.queryByRole('dialog')).toBeNull()
+  tree.update({})
+  fireEvent.click(tree.getByRole('button', { name: zh.projectNew }))
+  expect(tree.getByLabelText(zh.projectLocation)).toHaveProperty('value', '/')
+  expect(tree.face.run).not.toHaveBeenCalled()
+})
+
+it('offers ordinary conversation assignment and conversion only after an explicit menu choice', () => {
+  const tree = mount({ current: 's-loose' })
+  openMenu('conversation:s-loose')
+  fireEvent.click(menuItem(zh.projectJoin))
+  expect(tree.getByRole('dialog').getAttribute('aria-label')).toBe(zh.projectJoinTitle)
+  expect(tree.getAllByRole('radio').map(choice => choice.parentElement?.textContent)).toContain(sparse.title)
+  tree.update({ projects: null, current: 's-loose' })
+  expect(tree.queryAllByRole('radio')).toEqual([])
+  fireEvent.click(tree.getByRole('button', { name: zh.cancel }))
+  expect(tree.queryByRole('dialog')).toBeNull()
+  tree.update({ current: 's-loose' })
+  openMenu('conversation:s-loose')
+  fireEvent.click(menuItem(zh.projectConvert))
+  expect(tree.getByRole('dialog').getAttribute('aria-label')).toBe(zh.projectNew)
+  expect(tree.getByText(zh.projectJoinHint)).toBeTruthy()
+  fireEvent.click(tree.getByRole('button', { name: zh.cancel }))
+  expect(tree.queryByRole('dialog')).toBeNull()
+  expect(tree.face.run).not.toHaveBeenCalled()
 })

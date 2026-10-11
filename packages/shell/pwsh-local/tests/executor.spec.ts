@@ -361,6 +361,21 @@ describe('spawn construction (pure, every platform)', () => {
     await expect(ex.result()).resolves.toMatchObject({ exitCode: 42, signal: null, timedOut: false, aborted: false })
   })
 
+  it('reports a process range that remains occupied after natural completion', async () => {
+    const ctx = createContext()
+    const subprocess = new CapturingSubprocessRuntime(ctx)
+    subprocess.rangeDone = Promise.resolve(false)
+    await ctx.plugin(PwshLocalExecutor)
+    const ex = await start(ctx.shell, ctx.shell.resolve({ command: 'exit 0' }))
+    await expect(ex.done).resolves.toBeUndefined()
+    expect(ex.status).toBe('completed')
+    expect(ex.exitCode).toBe(0)
+    expect(ex.failure).toContain('work may be orphaned')
+    expect(ex.readOutput().delta).toContain('process range did not become empty')
+    expect(ex.readOutput().delta).toBe('')
+    await expect(ex.result()).rejects.toThrow('process range did not become empty')
+  })
+
   it('reports a failed natural-completion cleanup as possibly orphaned work', async () => {
     const ctx = createContext()
     const subprocess = new CapturingSubprocessRuntime(ctx)

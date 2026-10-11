@@ -103,6 +103,8 @@ One service owns every project record in the `research_workbench` storage domain
 
 A stale editor save commits the revision adopted from disk before reporting the conflict; rereading returns that revision, and interrupted history files stay intact. Completed experiments collect evidence even when submission already returns a final result; waits and background observation also recover completed runs whose evidence was not collected.
 
+Structured tool inputs are projected from the command validators in `src/tools.ts`. Overlapping object alternatives share an accepting field schema; the original Zod validator enforces each alternative when the tool executes. Nullable optional board fields normalize to absence before validation.
+
 | Source | What it holds |
 |---|---|
 | [`src/index.ts`](src/index.ts) | The service: project lifecycle, the new-research draft, removal from the list, command dispatch, the per-project queue, run observation, and each conversation's permission preset |
@@ -135,6 +137,7 @@ A stale editor save commits the revision adopted from disk before reporting the 
 | [`src/literature.ts`](src/literature.ts) | Crossref, OpenAlex and arXiv metadata; open-access PDF lookup |
 | [`src/images.ts`](src/images.ts) | Image generation (OpenAI Images API, gpt-image-2 by default, reference images through edits; chat-style providers) and reference figures from ar5iv |
 | [`src/board.ts`](src/board.ts) | The experiment board: the stored layout, machine probes, progress lines and collector scripts, read in the background |
+| [`src/board-values.ts`](src/board-values.ts) | Browser-safe `./board-values` selectors for run id/name/seed references, latest runs and wildcard names; shared by Host collection and Client rendering, with no runtime imports |
 | [`runtime/board_probe.py`](runtime/board_probe.py) | The standard-library probe that reports one machine's GPUs, processors, memory, disk and runs' progress lines |
 | [`src/gallery.ts`](src/gallery.ts) | The figure gallery: search with filters, keywords and optional title embeddings; figures fetched on demand into a cache |
 | [`runtime/figure-gallery/`](runtime/figure-gallery) | The index of about 3,500 top-venue Figure 1s from Top-Conf Figure Gallery, built by [`scripts/build_figure_gallery.py`](scripts/build_figure_gallery.py); no images |

@@ -252,3 +252,15 @@ it('rejects an unsupported changed-file action before invoking the desktop', asy
   expect((await open('?sessionId=owner&seq=9&index=0&action=remove')).status).toBe(400)
   expect(opener).not.toHaveBeenCalled()
 })
+
+
+it('refuses an open if desktop availability changes before the target read', async () => {
+  const f = await fixture()
+  const desktop = f.ctx.sessionController.workspaceDesktop()
+  vi.spyOn(f.ctx.sessionController, 'workspaceDesktop')
+    .mockReturnValueOnce({ ...desktop, available: true })
+    .mockReturnValueOnce({ ...desktop, available: false })
+  expect((await f.open()).status).toBe(409)
+  expect(f.readEvent).not.toHaveBeenCalled()
+  expect(f.opener).not.toHaveBeenCalled()
+})

@@ -744,3 +744,15 @@ describe('web-search-deepseek account route selection', () => {
     expect(headers).not.toHaveProperty('x-dsh-auth-token')
   })
 })
+
+
+describe('native search error payloads', () => {
+  it.each([['rate_limit', 'rate_limit'], [undefined, 'unknown_error'], ['', 'unknown_error'], ['private invalid message!', 'unknown_error']])('sanitizes array error code %s', (errorCode, expected) => {
+    expect(() => mapAnthropicResponse({ content: [{ type: 'web_search_tool_result', content: [{ type: 'web_search_tool_result_error', url: '', ...errorCode === undefined ? {} : { error_code: errorCode } }] }] }))
+      .toThrow(`DeepSeek native web search failed: ${expected}`)
+  })
+  it('does not expose malformed object error codes', () => {
+    expect(() => mapAnthropicResponse({ content: [{ type: 'web_search_tool_result', content: { type: 'web_search_tool_result_error', error_code: 'private invalid message!' } }] }))
+      .toThrow('DeepSeek native web search failed: unknown_error')
+  })
+})

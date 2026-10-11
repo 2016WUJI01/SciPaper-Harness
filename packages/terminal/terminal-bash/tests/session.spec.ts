@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { PassThrough } from 'node:stream'
 import { LocalPtySession } from '@deepseek-ai/dsh-terminal-bash/src/session.ts'
 import type { ResolvedConfig } from '@deepseek-ai/dsh-terminal-bash/src/config.ts'
@@ -1241,43 +1241,74 @@ describe('LocalPtySession readiness and output', () => {
     expect(session.motd).toBe('dsh> ')
   })
 
-  it.skipIf(process.platform !== 'win32')('waits for the complete pwsh prompt after ConPTY flushes buffered output', async () => {
-    vi.useFakeTimers()
-    const terminal = new FakeTerminal()
-    const session = new LocalPtySession(terminal, config({ shellDialect: 'pwsh', idleSilenceMs: 100, timeoutMs: 200 }))
-    await initialize(session, terminal)
-    const operation = session.startSend({ text: 'Write-Output result', submit: true })
-    let settled = false
-    void operation.done.then(() => { settled = true })
-    await Promise.resolve()
-    await Promise.resolve()
-    terminal.emitData('\x1b]133;D;0\x07')
-    terminal.emitData('result\r\ndsh>')
-    await vi.advanceTimersByTimeAsync(20)
-    expect(settled).toBe(false)
-    terminal.inspector.pgid = 789
-    terminal.emitData('\x1b[1C')
-    await vi.advanceTimersByTimeAsync(20)
-    expect(settled).toBe(false)
-    terminal.inspector.pgid = 456
-    await vi.advanceTimersByTimeAsync(10)
-    expect(await operation.done).toMatchObject({ waitReason: 'stdin_read', viewport: 'result\ndsh>' })
-  })
+  describe('ConPTY prompt delivery', () => {
+    const platform = process.platform
+    const sessions: LocalPtySession[] = []
+    beforeEach(() => { Object.defineProperty(process, 'platform', { value: 'win32' }) })
+    afterEach(async () => {
+      try {
+        await Promise.all(sessions.splice(0).map(session => session.close('test complete')))
+      } finally {
+        Object.defineProperty(process, 'platform', { value: platform })
+      }
+    })
 
-  it.skipIf(process.platform !== 'win32').each(['output dsh> ', 'output\r\ndsh> still running', 'output\r\nchild> '])(
-    'does not accept non-prompt pwsh output after an owned marker: %j', async (output) => {
+    it('waits for the complete pwsh prompt after ConPTY flushes buffered output', async () => {
       vi.useFakeTimers()
       const terminal = new FakeTerminal()
-      const session = new LocalPtySession(terminal, config({ shellDialect: 'pwsh' }))
+      const session = new LocalPtySession(terminal, config({ shellDialect: 'pwsh', idleSilenceMs: 100, timeoutMs: 200 }))
+      sessions.push(session)
       await initialize(session, terminal)
-      const operation = session.startSend({ text: 'run', submit: true })
+      const operation = session.startSend({ text: 'Write-Output result', submit: true })
+      let settled = false
+      void operation.done.then(() => { settled = true })
       await Promise.resolve()
       await Promise.resolve()
-      terminal.emitData('\x1b]133;D;0\x07' + output)
-      await vi.advanceTimersByTimeAsync(70)
-      expect((await operation.done).waitReason).toBe('inferred_idle')
-    },
-  )
+      terminal.emitData('\x1b]133;D;0\x07')
+      terminal.emitData('result\r\ndsh>')
+      await vi.advanceTimersByTimeAsync(20)
+      expect(settled).toBe(false)
+      terminal.inspector.pgid = 789
+      terminal.emitData('\x1b[1C')
+      await vi.advanceTimersByTimeAsync(20)
+      expect(settled).toBe(false)
+      terminal.inspector.pgid = 456
+      await vi.advanceTimersByTimeAsync(10)
+      expect(await operation.done).toMatchObject({ waitReason: 'stdin_read', viewport: 'result\ndsh>' })
+    })
+
+    it.each(['output dsh> ', 'output\r\ndsh> still running', 'output\r\nchild> '])(
+      'does not accept non-prompt pwsh output after an owned marker: %j', async (output) => {
+        vi.useFakeTimers()
+        const terminal = new FakeTerminal()
+        const session = new LocalPtySession(terminal, config({ shellDialect: 'pwsh' }))
+        sessions.push(session)
+        await initialize(session, terminal)
+        const operation = session.startSend({ text: 'run', submit: true })
+        await Promise.resolve()
+        await Promise.resolve()
+        terminal.emitData('\x1b]133;D;0\x07' + output)
+        await vi.advanceTimersByTimeAsync(70)
+        expect((await operation.done).waitReason).toBe('inferred_idle')
+      },
+    )
+
+    it('keeps bash prompt evidence literal on a Windows host', async () => {
+      vi.useFakeTimers()
+      const terminal = new FakeTerminal()
+      const session = new LocalPtySession(terminal, config())
+      try {
+        await initialize(session, terminal)
+        const operation = session.startSend({ text: 'run', submit: true })
+        await vi.advanceTimersByTimeAsync(0)
+        terminal.emitData('\x1b]133;D;0\x07output\r\ndsh>\x1b[C')
+        await vi.advanceTimersByTimeAsync(70)
+        expect((await operation.done).waitReason).toBe('inferred_idle')
+      } finally {
+        await session.close('test complete')
+      }
+    })
+  })
 
   it('does not attribute a delayed prior prompt to the current send', async () => {
     vi.useFakeTimers()

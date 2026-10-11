@@ -71,7 +71,7 @@ kind: "package-reference"
 
 ### 部署要求
 
-Node 部署在受支持的 macOS、Linux 与 Windows 目标上获得 `@vscode/ripgrep` 平台包；Python SDK 的 wheel 包把目标原生二进制复制到单文件运行时旁，作为 `-rg` 伴随文件。远端子进程组合通过 `rgPath` 指向远端已安装的可执行文件。返回路径相对于解析后的工作目录显示（有会话 cwd 时使用会话 cwd），只有该工作目录与文件系统根目录是同一工作区时，才能用 `read` 继续读取。
+Node 部署在受支持的 macOS、Linux 与 Windows 目标上获得 `@vscode/ripgrep` 平台包；Python SDK 的 wheel 包把目标原生二进制复制到单文件运行时旁，作为 `-rg` 伴随文件。远端子进程组合通过 `rgPath` 指向远端已安装的可执行文件。采样识别本机路径分隔符与 SSH 的 POSIX 斜杠；在 POSIX 主机上，反斜杠仍作为文件名字符。返回路径相对于解析后的工作目录显示（有会话 cwd 时使用会话 cwd），只有该工作目录与文件系统根目录是同一工作区时，才能用 `read` 继续读取。
 
 ### 失败与恢复
 

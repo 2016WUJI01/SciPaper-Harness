@@ -1202,3 +1202,75 @@ describe('deployment entry policy and draft preservation', () => {
     expect(displayed.release).not.toHaveBeenCalled()
   })
 })
+
+it('reuses an accepted draft candidate and drops a new candidate superseded during creation', async () => {
+  const b = bench({ sessions: sessionState([summary('blank', { blank: true, cwd: '/w/paper' })], 'pending'), workspaces: workspaceState([workspace('paper', [sid('blank')])], [], 'pending') })
+  const beforeOpen = vi.fn()
+  await b.uiWorkspace.openWorkspace(wid('paper'), beforeOpen, () => true)
+  expect(beforeOpen).toHaveBeenCalledExactlyOnceWith(sid('blank'))
+  const fresh = Promise.withResolvers<SessionId>()
+  b.sessions.create.mockImplementationOnce(async () => sid('blank')).mockImplementationOnce(() => fresh.promise)
+  const rejectedDraft = vi.fn(() => false)
+  const staleBeforeOpen = vi.fn()
+  const opening = b.uiWorkspace.openWorkspace(wid('paper'), staleBeforeOpen, rejectedDraft)
+  await vi.waitFor(() => { expect(rejectedDraft).toHaveBeenCalledOnce() })
+  b.uiWorkspace.openSession(sid('newer'))
+  fresh.resolve(sid('fresh'))
+  await opening
+  expect(staleBeforeOpen).not.toHaveBeenCalled()
+  expect(b.sessions.retained.at(-1)?.reference.sessionId).toBe(sid('newer'))
+})
+
+it('allows policy registration under recent entry without invoking it and makes disposal idempotent', () => {
+  const b = bench()
+  const policy = { land: vi.fn(), startNew: vi.fn() }
+  const dispose = b.uiWorkspace.setEntryPolicy(policy)
+  dispose()
+  const replacement = { land: vi.fn(), startNew: vi.fn() }
+  const removeReplacement = b.uiWorkspace.setEntryPolicy(replacement)
+  dispose()
+  expect(() => b.uiWorkspace.setEntryPolicy(policy)).toThrow('already registered')
+  removeReplacement()
+  expect(policy.land).not.toHaveBeenCalled()
+  expect(replacement.land).not.toHaveBeenCalled()
+})
+
+it('keeps a selection made before policy startup and does not run the fallback', async () => {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+  try {
+    const b = bench({ entry: 'policy' })
+    b.uiWorkspace.openSession(sid('selected'))
+    b.sessions.list.set(sessionState([summary('selected')]))
+    b.workspaces.list.set(workspaceState())
+    await vi.advanceTimersByTimeAsync(5000)
+    expect(b.workspaces.initializeDefault).not.toHaveBeenCalled()
+    expect(b.sessions.retained.at(-1)?.reference.sessionId).toBe(sid('selected'))
+  } finally { vi.useRealTimers() }
+})
+
+it('falls back to recent workspace when the deployment never registers its entry policy', async () => {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+  try {
+    const b = bench({ entry: 'policy', sessions: sessionState(), workspaces: workspaceState([workspace('paper')]) })
+    expect(b.sessions.create).not.toHaveBeenCalled()
+    await vi.advanceTimersByTimeAsync(5000)
+    expect(b.sessions.create).toHaveBeenCalledExactlyOnceWith({ workspaceId: wid('paper') })
+    expect(b.sessions.retained.at(-1)?.reference.sessionId).toBe(sid('created-paper'))
+  } finally { vi.useRealTimers() }
+})
+
+it('contains policy failures and allows a later new-session request', async () => {
+  const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+  const b = bench({ entry: 'policy', sessions: sessionState(), workspaces: workspaceState() })
+  const failure = new Error('landing unavailable')
+  const startNew = vi.fn().mockRejectedValueOnce(new Error('creation unavailable')).mockResolvedValueOnce(undefined)
+  b.uiWorkspace.setEntryPolicy({ land: () => { throw failure }, startNew })
+  await setImmediate()
+  expect(warn).toHaveBeenCalledWith('entry policy land failed:', failure)
+  b.uiWorkspace.startSession()
+  await setImmediate()
+  expect(warn).toHaveBeenCalledWith('entry policy startNew failed:', expect.objectContaining({ message: 'creation unavailable' }))
+  b.uiWorkspace.startSession()
+  await setImmediate()
+  expect(startNew).toHaveBeenCalledTimes(2)
+})

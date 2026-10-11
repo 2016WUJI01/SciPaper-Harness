@@ -1284,7 +1284,8 @@ export class SessionStore extends Service {
       inheritedEventCount: SessionLogOffset(resolved === undefined ? 0 : resolved + 1),
       meta: {
         ...liveSource.header.cwd !== undefined ? { cwd: liveSource.header.cwd } : {},
-        ...liveSource.header.execution === undefined ? {} : { execution: liveSource.header.execution },
+        // Session construction normalizes execution before the instance can enter the store.
+        execution: liveSource.header.execution as NonNullable<SessionHeader['execution']>,
         parentSession: liveSource.id,
         isSeeded: true,
       },

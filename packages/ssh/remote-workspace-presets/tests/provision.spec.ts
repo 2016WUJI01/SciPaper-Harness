@@ -2,11 +2,22 @@ import { createHash } from 'node:crypto'
 import { EventEmitter } from 'node:events'
 import { PassThrough } from 'node:stream'
 import { gunzipSync } from 'node:zlib'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 const mock = vi.hoisted(() => ({
   calls: [] as { args: string[]; input: Buffer; env: Record<string, string> | undefined }[], failure: '',
+  helper: Buffer.from('export const fixture = "SSH helper upload bytes";\n'),
 }))
+
+vi.mock('node:fs/promises', async (importOriginal) => {
+  const fs = await importOriginal<typeof import('node:fs/promises')>()
+  const { fileURLToPath } = await import('node:url')
+  const helper = fileURLToPath(import.meta.resolve('@deepseek-ai/dsh-ssh/helper'))
+  return {
+    ...fs,
+    readFile: async (...args: Parameters<typeof fs.readFile>) => args[0] === helper ? mock.helper : fs.readFile(...args),
+  }
+})
 
 vi.mock('node:child_process', () => ({
   // The `ssh -V` check that precedes a password login.
@@ -57,6 +68,12 @@ import { provisionRemoteWorkspace, sshCommand, validateRemoteWorkspace } from '.
 
 const SECRET = 'pässwörd测试 &%^"\'x!'
 
+afterEach(async () => {
+  mock.calls = []
+  mock.failure = ''
+  await disposeAskpass()
+})
+
 describe('remote workspace helper setup', () => {
   it('uploads the bundled helper through strict noninteractive SSH and returns verified coordinates', async () => {
     mock.calls = []
@@ -74,7 +91,7 @@ describe('remote workspace helper setup', () => {
       expect(call.args).toContain('campus')
     }
     const bytes = mock.calls[1]?.input
-    expect(bytes?.length).toBeGreaterThan(100_000)
+    expect(bytes).toEqual(mock.helper)
     expect(createHash('sha256').update(bytes as Buffer).digest('hex')).toBe(runtime.helperHash)
     expect(mock.calls[1]?.args.at(-1)).toContain("'/srv/input'")
     const archive = mock.calls[2]?.input

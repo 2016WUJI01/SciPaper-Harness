@@ -81,14 +81,14 @@ function median(values: readonly number[]): number {
     : sorted[middle] ?? 0
 }
 
-function cloneIndex(index: RegistryIndex): Map<string, Map<string, MutableRegistryManifest>> {
-  return new Map([...index].map(([name, versions]) => [
+function cloneIndex(index: RegistryIndex): Map<string, Map<string, MutableRegistryManifest>> & RegistryIndex {
+  return Object.assign(new Map([...index].map(([name, versions]) => [
     name,
     new Map([...versions].map(([version, manifest]) => [
       version,
       structuredClone(manifest) as MutableRegistryManifest,
     ])),
-  ]))
+  ])), index.overrides === undefined ? {} : { overrides: index.overrides })
 }
 
 function publishedSection(

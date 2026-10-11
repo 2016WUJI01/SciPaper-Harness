@@ -6,8 +6,7 @@
  */
 
 import type { Context, Volatile } from '@deepseek-ai/cordis'
-import { credentialRef } from '@deepseek-ai/dsh-credentials'
-import type {} from '@deepseek-ai/dsh-credentials'
+import { providerApiKeyOptions } from '@deepseek-ai/dsh-credentials'
 import { launchEnvironmentOf } from '@deepseek-ai/dsh-launch-environment'
 import z from '@deepseek-ai/schemastery'
 import type {} from '@deepseek-ai/dsh-web'
@@ -56,15 +55,8 @@ export const Config = z.object({
 /** Register the Perplexity search provider with `ctx.web`. */
 export function apply(ctx: Context, config: Config): void {
   const apiKeyEnv = config.apiKeyEnv ?? 'PERPLEXITY_API_KEY'
-  const credentials = ctx.get('credentials')
   ctx.web.registerSearchProvider(new PerplexitySearchProvider({
-    // Every environment layer may name this key: the product trusts the
-    // project it is launched in, and the managed store is not involved here.
-    apiKey: (typeof config.apiKey === 'string' ? config.apiKey : config.apiKey?.get())
-      ?? launchEnvironmentOf(ctx).get(apiKeyEnv)?.value ?? '',
-    ...credentials === undefined ? {} : {
-      resolveApiKey: async () => (await credentials.resolve(credentialRef(apiKeyEnv)))?.value,
-    },
+    ...providerApiKeyOptions(ctx, config.apiKey, apiKeyEnv, () => launchEnvironmentOf(ctx).get(apiKeyEnv)?.value),
     baseURL: config.baseURL ?? PERPLEXITY_DEFAULT_BASE_URL,
     model: config.model ?? PERPLEXITY_DEFAULT_MODEL,
     maxTokens: config.maxTokens ?? PERPLEXITY_DEFAULT_MAX_TOKENS,

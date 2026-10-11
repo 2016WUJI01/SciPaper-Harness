@@ -1149,6 +1149,7 @@ describe('Issue lifecycle workflow', () => {
 
     expect(lifecycle.on).toHaveProperty('pull_request')
     expect(lifecycle.on).toHaveProperty('pull_request_review')
+    expect(lifecycleJob.if).toContain("github.repository == 'deepseek-harness/deepseek-harness'")
     expect(lifecycleJob.if).toContain("github.event.review.state == 'changes_requested'")
     expect(lifecycleJob.if).toContain('github.event.changes.body != null')
     // Keep the subscription-type gates: issue-lifecycle does not re-subscribe
@@ -1184,6 +1185,15 @@ describe('Issue lifecycle workflow', () => {
     const policyJob = workflowJob(policy, 'policy')
     if (!Array.isArray(policyJob.steps)) throw new TypeError('Issue policy job must define steps')
     const steps = policyJob.steps.filter(isRecord)
+    const checkoutStep = steps.find(step => typeof step.uses === 'string' && step.uses.startsWith('actions/checkout@'))
+    expect(checkoutStep).toMatchObject({
+      with: {
+        ref: "${{ github.repository == 'deepseek-harness/deepseek-harness' && github.event.repository.default_branch || github.sha }}",
+        'persist-credentials': false,
+      },
+    })
+    expect(policy.permissions).toEqual({ contents: 'read', issues: 'read', 'pull-requests': 'read' })
+    expect(policy.on).not.toHaveProperty('pull_request_target')
     const tokenStep = steps.find(step => step.name === 'Create Project read token')
     const validateStep = steps.find(step => step.name === 'Validate pull request')
     const preflightStep = steps.find(step => step.id === 'preflight')
@@ -1196,7 +1206,7 @@ describe('Issue lifecycle workflow', () => {
 
     expect(tokenStep).toMatchObject({
       id: 'app-token',
-      if: "${{ steps.preflight.outputs.needs-project == 'true' }}",
+      if: "${{ github.repository == 'deepseek-harness/deepseek-harness' && steps.preflight.outputs.needs-project == 'true' }}",
       uses: 'actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1',
       with: {
         'client-id': '${{ vars.DSH_ISSUE_APP_CLIENT_ID }}',

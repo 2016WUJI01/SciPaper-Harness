@@ -43,6 +43,7 @@ import * as nodeUtilTypes from './builtin_modules/implemented/util/types.ts'
 import * as nodeZlib from './builtin_modules/implemented/zlib.ts'
 import * as nodeChildProcess from './builtin_modules/implemented/child_process.ts'
 import * as nodeNet from './builtin_modules/mock/net.ts'
+import * as nodeTls from './builtin_modules/mock/tls.ts'
 import * as nodeSqlite from './builtin_modules/mock/sqlite.ts'
 import * as nodeVm from './builtin_modules/mock/vm.ts'
 import * as nodeWorkerThreads from './builtin_modules/mock/worker_threads.ts'
@@ -80,6 +81,7 @@ const BUILTINS: Record<string, StaticModuleFactory> = {
   stream: () => nodeStream,
   'stream/promises': () => nodeStreamPromises,
   'timers/promises': () => nodeTimersPromises,
+  tls: () => nodeTls,
   tty: () => nodeTty,
   url: () => nodeUrl,
   util: () => nodeUtil,

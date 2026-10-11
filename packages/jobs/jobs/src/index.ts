@@ -157,7 +157,7 @@ export abstract class JobRegistry extends Service {
     }
   }
 
-  /** Invoke eligible detached-work adapters concurrently within the same absolute bound. */
+  /** Invoke adapters concurrently within one deadline; release each observation timer and abort listener. */
   private async stopIndependentWork(request: SessionStopRequest): Promise<NamedStopSourceReport[]> {
     const eligible = new Set(this.stopSources.global.sources)
     for (const agent of request.agents) for (const layer of this.stopSources.chainLayers(scopeOf(agent.ctx))) {
@@ -168,28 +168,27 @@ export abstract class JobRegistry extends Service {
         return { source: source.name, confirmed: false, targets: [], error: 'no live runtime caller is available to authorize independent work stops' }
       }
       let timer: ReturnType<typeof setTimeout> | undefined
-      let onAbort: (() => void) | undefined
+      const cancelled = Promise.withResolvers<never>()
+      const onAbort = (): void => {
+        const reason: unknown = request.signal?.reason
+        cancelled.reject(reason instanceof Error ? reason : new Error(String(reason)))
+      }
       try {
+        timer = setTimeout(() => {
+          cancelled.reject(new Error('independent work stop was not confirmed before the timeout'))
+        }, Math.max(0, request.deadline - Date.now()))
+        request.signal?.addEventListener('abort', onAbort, { once: true })
+        if (request.signal?.aborted) onAbort()
         const report = await Promise.race([
           Promise.resolve().then(() => source.stop(request)),
-          new Promise<never>((_resolve, reject) => {
-            timer = setTimeout(() => {
-              reject(new Error('independent work stop was not confirmed before the timeout'))
-            }, Math.max(0, request.deadline - Date.now()))
-            onAbort = () => {
-              const reason: unknown = request.signal?.reason
-              reject(reason instanceof Error ? reason : new Error(String(reason)))
-            }
-            request.signal?.addEventListener('abort', onAbort, { once: true })
-            if (request.signal?.aborted) onAbort()
-          }),
+          cancelled.promise,
         ])
         return { ...report, source: source.name }
       } catch (error) {
         return { source: source.name, confirmed: false, targets: [], error: String(error) }
       } finally {
         clearTimeout(timer)
-        if (onAbort !== undefined) request.signal?.removeEventListener('abort', onAbort)
+        request.signal?.removeEventListener('abort', onAbort)
       }
     }))
   }

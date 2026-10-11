@@ -76,6 +76,14 @@ export function connect(): never {
   throw new Error('web-preview: node:net.connect is not available in the worker host')
 }
 
+/**
+ * Outbound connection alias used by the SSH transport.
+ * @returns Never — it throws naming the unavailable member.
+ */
+export function createConnection(): never {
+  throw new Error('web-preview: node:net.createConnection is not available in the worker host')
+}
+
 /** CommonJS interop marker: the worker loader hands `default` to default imports (see ./builtins.ts). */
 export const __esModule = true
 
@@ -87,4 +95,4 @@ export const __esModule = true
 type NodeFace = Partial<Omit<typeof import('node:net'), 'Socket'>> & Record<'Socket', unknown>
 
 /** CommonJS default export: the members `require()` hands a caller of this module. */
-export default { Socket, isIP, isIPv4, isIPv6, createServer, connect } satisfies NodeFace
+export default { Socket, isIP, isIPv4, isIPv6, createServer, connect, createConnection } satisfies NodeFace

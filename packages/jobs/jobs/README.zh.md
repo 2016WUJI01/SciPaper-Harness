@@ -39,7 +39,7 @@ kind: "package-reference"
 
 ### 启动后台工作需要一个控制器
 
-独立 supervisor 可通过 `registerStopSource(name, source)` 注册随插件 effect 释放的适配器。只有显式 `stopAll(caller, timeoutMs, reason?, signal?, deadlineAt?)` 会调用它；普通轮次取消、所有者释放和服务释放都保留它的资源。适配器接收实际登记的调用者对象、已验证的活体运行时后代与同一个绝对截止时间，须自行验证目标归属并返回 `{ confirmed, targets: [{ id, status, confirmed, error? }], error? }`。可修改的 session id 和持久的分叉来源不授予权限。停止结果在 `jobs` 外还包含 `sources`；适配器超时、失败或目标未知都会阻止确认。外层截止时间只能缩短等待，不能重置观察预算。
+独立 supervisor 可通过 `registerStopSource(name, source)` 注册随插件 effect 释放的适配器。只有显式 `stopAll(caller, timeoutMs, reason?, signal?, deadlineAt?)` 会调用它；普通轮次取消、所有者释放和服务释放都保留它的资源。适配器接收实际登记的调用者对象、已验证的活体运行时后代与同一个绝对截止时间，须自行验证目标归属并返回 `{ confirmed, targets: [{ id, status, confirmed, error? }], error? }`。可修改的 session id 和持久的分叉来源不授予权限。停止结果在 `jobs` 外还包含 `sources`；适配器超时、失败或目标未知都会阻止确认。外层截止时间只能缩短等待，不能重置观察预算。每次适配器观察都会在完成、失败、超时或调用者取消后释放自己的定时器与取消监听器。
 
 只有附加了服务于所有者的控制器时，生产方才能启动工作——加载 `dsh-tool-jobs` 即附加一个。组合中未加载任何控制器的 agent 无法启动后台工作；`start()` 会以指出缺失控制器的消息失败，而不会启动 agent 永远无法收集或停止的工作。
 

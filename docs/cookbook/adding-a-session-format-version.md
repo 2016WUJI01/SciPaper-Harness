@@ -117,19 +117,19 @@ git diff --check
 ```
 
 <a id="v4-corpus-trial"></a>
-### Developer V4 corpus trial
+### Developer corpus trial
 
-Use the one-time [migration script](../../scripts/migrate-sessions-to-v4.ts) from an installed contributor checkout whose writer is V4. Stop DSH processes using the target root before starting so writer locks and changing child logs do not prevent migration. Run from the repository root:
+Use the [current-format migration script](../../scripts/migrate-sessions-current.ts) from an installed contributor checkout. The legacy `migrate:sessions-to-v4` entry requires a V4 writer and refuses another writer before opening any input; it never silently publishes a different format. Stop DSH processes using the target root before starting so writer locks and changing child logs do not prevent migration. Run from the repository root:
 
 ```sh
-pnpm run migrate:sessions-to-v4
+pnpm run migrate:sessions-current
 ```
 
-The default root is `~/.dsh/sessions`. Use `--sessions-dir /path/to/sessions-copy` for another corpus, or `--help` for usage. Concurrent jobs default to the available CPU count capped at 16; `--jobs N` accepts any positive safe integer, including larger expert overrides, and `--jobs 1` runs serially. A bounded queue opens only that many Sessions at once, regardless of corpus size. Each historical Session goes through the normal locked, validated publication path to create a V4 successor beside its unchanged source files. Existing V4 Sessions are opened read-only; rerunning does not reconvert them. The script makes no model requests and does not change conversion or refusal rules.
+The default root is `~/.dsh/sessions`. Use `--sessions-dir /path/to/sessions-copy` for another corpus, or `--help` for usage. Concurrent jobs default to the available CPU count capped at 16; `--jobs N` accepts any positive safe integer, including larger expert overrides, and `--jobs 1` runs serially. A bounded queue opens only that many Sessions at once, regardless of corpus size. Each historical Session goes through the normal locked, validated publication path to create only the final current successor beside its unchanged source files. Existing current-generation Sessions are opened read-only; rerunning does not reconvert them. The script makes no model requests and does not change conversion or refusal rules.
 
-The terminal reports each Session's selected file, version, progress, outcome, and elapsed time. Individual errors do not stop later Sessions. The final summary lists every failure and the full diagnostic log under the system temporary directory; any failure returns a nonzero exit status. It also prints JSON and saves the same report as `summary.json` beside `migration.log`: counts by source version and outcome, grouped failure reasons, per-input diagnostics, runtime details, and both report paths. Known diagnostics expose event types, unexpected members, child-log involvement, and sequence numbers; unrecognized errors retain their messages without inferred causes. Include these reports when reporting a migration problem. Sessions converted during this run remain distinct from those already at V4.
+The terminal reports each Session's selected file, version, progress, outcome, and elapsed time. Individual errors do not stop later Sessions. The final summary lists every failure and the full diagnostic log under the system temporary directory; any failure returns a nonzero exit status. It also prints JSON and saves the same report as `summary.json` beside `migration.log`: counts by source version and outcome, grouped failure reasons, per-input diagnostics, runtime details, and both report paths. Known diagnostics expose event types, unexpected members, child-log involvement, and sequence numbers; unrecognized errors retain their messages without inferred causes. Include these reports when reporting a migration problem. Report schema version 2 uses `alreadyCurrent` for the already-current count and `targetVersion` for the selected writer. Sessions converted during this run remain distinct from those already current.
 
-Concurrent conversion can invalidate a parent’s child evidence when the child publishes V4. Only that source-change error receives one sequential retry after all initial jobs finish; corruption, unsupported formats, and held locks are reported immediately. Completion lines keep the original input index and a separate completed count, so out-of-order results remain readable.
+Concurrent conversion can invalidate a parent’s child evidence when the child publishes its successor. Only that source-change error receives one sequential retry after all initial jobs finish; corruption, unsupported formats, and held locks are reported immediately. Completion lines keep the original input index and a separate completed count, so out-of-order results remain readable.
 
 <a id="final-v3-vocabulary"></a>
 ### Final V3 event vocabulary before V4 publication

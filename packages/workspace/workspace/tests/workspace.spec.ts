@@ -19,8 +19,10 @@ import WorkspaceRegistry, {
   WorkspaceMoveInvalidError,
   WorkspaceOrderInvalidError,
 } from '../src/index.ts'
-import type { WorkspaceDomainState, WorkspaceRecord } from '../src/index.ts'
-import { defaultWorkspaceTitle, fullyQualifiedWorkspacePath, normalizeSshWorkspacePath } from '../src/paths.ts'
+import type { WorkspaceDomainState, WorkspaceRecord, WorkspaceLocation } from '../src/index.ts'
+import { defaultWorkspaceTitle, fullyQualifiedWorkspacePath, normalizeSshWorkspacePath, sshWorkspaceLocation } from '../src/paths.ts'
+
+import { workspaceLocation } from '../src/spec.ts'
 
 const DOMAIN_VERSION = 2
 
@@ -211,8 +213,47 @@ describe('WorkspaceRegistry lifecycle and bootstrap', () => {
     expect(await workspaces[0]!.status()).toBe('unknown')
   })
 
+  it('attaches a new SSH session only to the matching host and canonical path', async () => {
+    const result = await harness({ sessionStore: true })
+    try {
+      const workspace = await result.registry.create({ kind: 'ssh', host: 'lab', path: '/srv/study' })
+      const remote = result.ctx.sessions.create(SessionId('remote-attach'), { meta: { cwd: '/srv/./study/', execution: { kind: 'ssh', host: 'lab' } } })
+      await workspace.attachSession(remote.id)
+      expect(workspace.sessionIds).toEqual([remote.id])
+      const foreign = result.ctx.sessions.create(SessionId('foreign-attach'), { meta: { cwd: '/srv/study', execution: { kind: 'ssh', host: 'other' } } })
+      await expect(workspace.attachSession(foreign.id)).rejects.toThrow(/resolves to/)
+      expect(workspace.sessionIds).toEqual([remote.id])
+    } finally { await result.ctx.fiber.dispose() }
+  })
+
+  it('accepts explicit local identities and rejects unknown kinds from untyped callers', async () => {
+    const path = await makeDir('native-location')
+    const result = await harness()
+    try {
+      const workspace = await result.registry.create({ kind: 'local', path })
+      await expect(result.registry.resolveByPath({ kind: 'local', path })).resolves.toBe(workspace)
+      const input: unknown = JSON.parse(JSON.stringify({ kind: 'unsupported', path }))
+      await expect(result.registry.create(input as WorkspaceLocation)).rejects.toThrow('location kind must be local or ssh')
+      await expect(result.registry.resolveByPath(input as WorkspaceLocation)).rejects.toThrow('location kind must be local or ssh')
+      expect(result.registry.list()).toEqual([workspace])
+    } finally { await result.ctx.fiber.dispose() }
+  })
+
+  it('validates durable SSH identities without allowing noncanonical or malformed paths', () => {
+    for (const path of ['/', '/srv/study']) {
+      expect(workspaceLocation.parse({ kind: 'ssh', host: 'lab', path })).toEqual({ kind: 'ssh', host: 'lab', path })
+    }
+    for (const path of ['relative', '/srv/../study', '/srv/study/', '/a\0b']) {
+      expect(workspaceLocation.safeParse({ kind: 'ssh', host: 'lab', path }).success).toBe(false)
+    }
+    expect(workspaceLocation.safeParse({ kind: 'ssh', host: '   ', path: '/' }).success).toBe(false)
+    expect(workspaceLocation.safeParse({ kind: 'unsupported', path: '/' }).success).toBe(false)
+  })
+
   it('validates SSH paths with POSIX semantics on a Windows Host', () => {
     expect(normalizeSshWorkspacePath('/srv/a/../b/')).toBe('/srv/b')
+    expect(normalizeSshWorkspacePath('/')).toBe('/')
+    expect(() => sshWorkspaceLocation('  ', '/')).toThrow('SSH Workspace host is required')
     expect(() => normalizeSshWorkspacePath('C:\\research')).toThrow(/absolute POSIX/)
     expect(() => normalizeSshWorkspacePath('relative')).toThrow(/absolute POSIX/)
   })

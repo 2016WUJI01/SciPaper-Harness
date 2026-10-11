@@ -899,3 +899,10 @@ it('leaves unnamed history titles empty for locale-owned row labels', () => {
   const sessions = list(item)
   expect(deriveFlat(sessions, [item.id], noRows, noAttention)[0]?.title).toBe('')
 })
+
+it('labels a remote search result without a working directory using only its host', () => {
+  const loose = { ...summary('loose', 1), execution: { kind: 'ssh' as const, host: 'alpha' } }
+  const result = deriveSearchResults(list(loose), [], 'alpha', noArchive, 'default', noAttention,
+    { items: [], hasMore: false }, 10)
+  expect(result.items.map(item => [item.id, item.workspace])).toEqual([[sid('loose'), 'alpha:']])
+})

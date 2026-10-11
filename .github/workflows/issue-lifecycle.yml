@@ -33,7 +33,9 @@ concurrency:
 jobs:
   lifecycle:
     name: Issue lifecycle
+    # This App and organization Project belong only to the configured upstream repository.
     if: >-
+      github.repository == 'deepseek-harness/deepseek-harness' &&
       (github.event_name != 'pull_request_review' || github.event.review.state == 'changes_requested') &&
       (github.event_name != 'pull_request' || github.event.action != 'edited' || github.event.changes.body != null)
     runs-on: ubuntu-latest

@@ -90,6 +90,14 @@ async function nextFrame(
 }
 
 describe('WorkspaceController commands', () => {
+  it('refuses a wire request with no location and a remote request without its backend', async () => {
+    const { controller } = await harness({ remote: false })
+    await expect(controller.create({} as never)).rejects.toMatchObject({ code: 'gateway/bad-request', message: 'Workspace location is required' })
+    const rejected = controller.create({ location: { kind: 'ssh', host: 'lab', path: '/srv/lab' } })
+    await expect(rejected).rejects.toMatchObject({ code: 'workspace/invalid-path' })
+    await expect(rejected).rejects.toThrow('SSH workspace backend is unavailable')
+  })
+
   it('supplies local location identity for legacy records in the baseline, updates, and a reconnect', async () => {
     const path = realpathSync.native(mkdtempSync(join(tmpdir(), 'dsh-legacy-workspace-')))
     tempDirs.push(path)

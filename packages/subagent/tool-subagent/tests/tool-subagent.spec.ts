@@ -1164,8 +1164,8 @@ describe('dsh-tool-subagent background mode', () => {
 
     const withReason = await ctx.tools.execute({ signal: testToolSignal, callId: ToolCallId('k1'), name: 'job_kill', arguments: { job_id: 'subagent-1', reason: 'superseded' }, agent: parent })
     const withoutReason = await ctx.tools.execute({ signal: testToolSignal, callId: ToolCallId('k2'), name: 'job_kill', arguments: { job_id: 'subagent-2' }, agent: parent })
-    expect(text(withReason)).toBe('requested cancellation of job subagent-1')
-    expect(text(withoutReason)).toBe('requested cancellation of job subagent-2')
+    expect(text(withReason)).toBe('requested cancellation of job subagent-1 [status: stopping]')
+    expect(text(withoutReason)).toBe('requested cancellation of job subagent-2 [status: stopping]')
     expect(cancels).toEqual(['superseded', 'background subagent task killed'])
 
     // The aborted children settle as killed tasks.

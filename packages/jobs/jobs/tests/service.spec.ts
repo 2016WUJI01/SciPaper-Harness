@@ -1,6 +1,7 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import { SessionId } from '@deepseek-ai/dsh-session'
+import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
+import AgentRegistry, { type Agent } from '@deepseek-ai/dsh-agent'
 import { JobId, JobRegistry } from '@deepseek-ai/dsh-jobs'
 import type {
   JobEvent, JobEventFilter, JobEventListener, JobHooks, JobOutputSource, JobOutputRead, JobRead, JobSpec, JobView,
@@ -148,5 +149,176 @@ describe('JobRegistry seam', () => {
     const ctx = new Context()
     await expect(ctx.plugin(JobRegistry as typeof StubJobRegistry))
       .rejects.toThrow(/abstract job registry seam; load an implementation such as @deepseek-ai\/dsh-jobs-local/)
+  })
+})
+
+/** A storage-only provider exercises the seam's default tree and stop orchestration. */
+describe('JobRegistry default stop orchestration', () => {
+  async function setup() {
+    const ctx = new Context()
+    await ctx.plugin(StubJobRegistry)
+    const jobs = ctx.jobs as StubJobRegistry
+    const rows = new Map<JobId, JobView>()
+    const subscriptions = jobs.subscriptions
+    vi.spyOn(jobs, 'list').mockImplementation(caller => [...rows.values()].filter(row => row.owner === undefined || row.owner === caller))
+    vi.spyOn(jobs, 'get').mockImplementation((id) => {
+      const row = rows.get(id)
+      if (row === undefined) throw new Error('job removed')
+      return row
+    })
+    const baselineSubscriptions = [...subscriptions]
+    return { ctx, jobs, rows, subscriptions, baselineSubscriptions }
+  }
+
+  const row = (id: string, owner?: SessionId): JobView => ({
+    id: JobId(id), kind: 'bash', label: id, status: 'running', startedAt: 0,
+    output: { total: 0, earliest: 0 }, ...(owner === undefined ? {} : { owner }),
+  })
+
+  it('rejects invalid stop budgets and empty adapter names before cancellation', async () => {
+    const { ctx, jobs, baselineSubscriptions } = await setup()
+    try {
+      expect(() => jobs.registerStopSource('', async () => ({ confirmed: true, targets: [] }))).toThrow('name must not be empty')
+      for (const timeout of [-1, NaN, Infinity]) await expect(jobs.stopAll(undefined, timeout)).rejects.toThrow('invalid stop timeout')
+      await expect(jobs.stopAll(undefined, 10, undefined, undefined, Infinity)).rejects.toThrow('invalid absolute stop deadline')
+      await expect(jobs.stopAll(undefined, 10, undefined, AbortSignal.abort(new Error('cancelled')))).rejects.toThrow('cancelled')
+      expect(jobs.subscriptions).toEqual(baselineSubscriptions)
+    } finally { await ctx.fiber.dispose() }
+  })
+
+  it('deduplicates shared jobs while traversing only the caller runtime descendants', async () => {
+    const { ctx, jobs, rows } = await setup()
+    await ctx.plugin(SessionStore)
+    await ctx.plugin(AgentRegistry)
+    const make = (id: string): Agent => ({ id: SessionId(id), ctx, session: ctx.sessions.create(SessionId(id)), status: 'idle' } as Agent)
+    const root = make('root')
+    const child = make('child')
+    const grandchild = make('grandchild')
+    const foreign = make('foreign')
+    await ctx.agents.register(root)
+    ctx.agents.enter(child, root)
+    ctx.agents.enter(grandchild, child)
+    await ctx.agents.register(foreign)
+    for (const job of [row('shared'), row('root-job', root.id), row('child-job', child.id), row('grandchild-job', grandchild.id), row('foreign-job', foreign.id)]) rows.set(job.id, job)
+    try {
+      expect(jobs.listTree(root.id).map(job => job.id)).toEqual(['shared', 'root-job', 'child-job', 'grandchild-job'])
+      expect(jobs.listTree().map(job => job.id)).toEqual(['shared'])
+      expect(jobs.listTree(SessionId('missing')).map(job => job.id)).toEqual(['shared'])
+      const source = vi.fn(async () => ({ confirmed: true, targets: [] }))
+      const remove = jobs.registerStopSource('adapter', source)
+      rows.clear()
+      await expect(jobs.stopAll(root.id, 100, 'explicit')).resolves.toMatchObject({ confirmed: true })
+      expect(source).toHaveBeenCalledWith(expect.objectContaining({ caller: root, agents: [root, child, grandchild], reason: 'explicit' }))
+      remove()
+    } finally { await ctx.fiber.dispose() }
+  })
+
+  it.each([new Error('request cancelled'), 'request cancelled'])('contains cancellation of independent work: %s', async (reason) => {
+    const { ctx, jobs, baselineSubscriptions } = await setup()
+    const entered = Promise.withResolvers<undefined>()
+    const controller = new AbortController()
+    const attached = vi.spyOn(controller.signal, 'addEventListener')
+    const removed = vi.spyOn(controller.signal, 'removeEventListener')
+    jobs.registerStopSource('remote', () => { entered.resolve(undefined); return new Promise(() => {}) })
+    try {
+      const stopping = jobs.stopAll(undefined, 1000, undefined, controller.signal)
+      await entered.promise
+      controller.abort(reason)
+      await expect(stopping).resolves.toMatchObject({ confirmed: false, sources: [{ source: 'remote', error: 'Error: request cancelled' }] })
+      expect(jobs.subscriptions).toEqual(baselineSubscriptions)
+      expect(removed).toHaveBeenCalledWith('abort', attached.mock.calls[0]![1])
+    } finally { await ctx.fiber.dispose() }
+  })
+
+  it('contains an already-cancelled adapter observation after subscription setup', async () => {
+    const { ctx, jobs } = await setup()
+    const controller = new AbortController()
+    jobs.registerStopSource('remote', () => new Promise(() => {}))
+    const subscribe = jobs.events.subscribe.bind(jobs.events)
+    vi.spyOn(jobs.events, 'subscribe').mockImplementation((filter, listener) => {
+      controller.abort('caller left during subscription')
+      return subscribe(filter, listener)
+    })
+    try {
+      await expect(jobs.stopAll(undefined, 1000, undefined, controller.signal)).resolves.toMatchObject({
+        confirmed: false, sources: [{ error: 'Error: caller left during subscription' }],
+      })
+    } finally { await ctx.fiber.dispose() }
+  })
+
+  it('preserves settlement events when an owner removes a job before its waiter resolves', async () => {
+    const { ctx, jobs, rows, subscriptions } = await setup()
+    const first = row('first')
+    rows.set(first.id, first)
+    vi.spyOn(jobs, 'kill').mockImplementation(() => {
+      const settled = { ...first, status: 'killed' as const, finishedAt: 1 }
+      rows.set(first.id, settled)
+      for (const { listener } of subscriptions) listener({ type: 'settled', job: settled, awaited: true, cause: 'producer' })
+      rows.delete(first.id)
+      return 'requested'
+    })
+    vi.spyOn(jobs, 'wait').mockRejectedValue(new Error('owner removed job'))
+    try {
+      const report = await jobs.stopAll(undefined, 100)
+      expect(report).toMatchObject({ confirmed: true, jobs: [{ job: { id: first.id, status: 'killed' } }] })
+    } finally { await ctx.fiber.dispose() }
+  })
+
+  it('requests cancellation with zero wait budget and reports the still-live state', async () => {
+    const { ctx, jobs, rows } = await setup()
+    const first = row('first')
+    rows.set(first.id, first)
+    const kill = vi.spyOn(jobs, 'kill')
+    const wait = vi.spyOn(jobs, 'wait')
+    try {
+      await expect(jobs.stopAll(undefined, 0)).resolves.toMatchObject({ confirmed: false, jobs: [{ job: first, error: 'job stop was not confirmed before the timeout' }] })
+      expect(kill).toHaveBeenCalledWith(first.id, undefined, undefined)
+      expect(wait).not.toHaveBeenCalled()
+    } finally { await ctx.fiber.dispose() }
+  })
+
+  it('keeps a removed, unobserved job unconfirmed when waiting fails', async () => {
+    const { ctx, jobs, rows } = await setup()
+    const first = row('first')
+    rows.set(first.id, first)
+    vi.spyOn(jobs, 'kill').mockImplementation(() => { rows.delete(first.id); return 'requested' })
+    vi.spyOn(jobs, 'wait').mockRejectedValue(new Error('lost connection'))
+    try {
+      await expect(jobs.stopAll(undefined, 100)).resolves.toMatchObject({ confirmed: false, jobs: [{ job: first, error: 'Error: lost connection' }] })
+    } finally { await ctx.fiber.dispose() }
+  })
+
+  it('reports per-job cancellation errors and orphaned outcomes independently', async () => {
+    const { ctx, jobs, rows } = await setup()
+    const first = row('throws')
+    const orphaned = { ...row('orphaned'), status: 'failed' as const, detail: 'work may be orphaned' }
+    rows.set(first.id, first)
+    rows.set(orphaned.id, orphaned)
+    vi.spyOn(jobs, 'kill').mockImplementation(() => { throw new Error('cannot cancel') })
+    try {
+      await expect(jobs.stopAll(undefined, 100)).resolves.toMatchObject({ confirmed: false, jobs: [
+        { job: first, error: 'Error: cannot cancel' }, { job: orphaned, error: orphaned.detail },
+      ] })
+    } finally { await ctx.fiber.dispose() }
+  })
+
+  it('reports newly admitted work after cancellation without sending a second stop', async () => {
+    const { ctx, jobs, rows } = await setup()
+    const first = row('first')
+    const late = row('late')
+    rows.set(first.id, first)
+    const controller = new AbortController()
+    const kill = vi.spyOn(jobs, 'kill').mockImplementation(() => {
+      rows.set(late.id, late)
+      controller.abort('caller left')
+      return 'requested'
+    })
+    vi.spyOn(jobs, 'wait').mockRejectedValue(new Error('caller left'))
+    try {
+      await expect(jobs.stopAll(undefined, 100, undefined, controller.signal)).resolves.toMatchObject({ confirmed: false, jobs: [
+        { job: first, error: 'Error: caller left' }, { job: late, error: 'job started while stopping the session' },
+      ] })
+      expect(kill).toHaveBeenCalledTimes(1)
+    } finally { await ctx.fiber.dispose() }
   })
 })

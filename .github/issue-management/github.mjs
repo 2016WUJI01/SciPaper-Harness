@@ -3,6 +3,7 @@
 import process from 'node:process'
 
 import config from './config.json' with { type: 'json' }
+import { repositoryName, usesConfiguredProject } from './repository.mjs'
 
 const API_VERSION = '2026-03-10'
 
@@ -69,7 +70,7 @@ export async function graphql(query, variables) {
  * @returns {Promise<object|null>} Issue snapshot, or null when the number identifies a pull request.
  */
 export async function issueSnapshot(number, status = undefined) {
-  const issue = await api(`/repos/${config.organization}/${config.repository}/issues/${number}`)
+  const issue = await api(`/repos/${repositoryName()}/issues/${number}`)
   if (issue.pull_request) return null
   const context = await projectContext(number)
   return {
@@ -92,6 +93,9 @@ export async function issueSnapshot(number, status = undefined) {
  * @returns {Promise<object>} Project, Issue, fields, optional item, and status actor; never writes.
  */
 export async function projectContext(number, includeStatusActor = false, includeStartDate = false) {
+  if (!usesConfiguredProject()) {
+    throw new Error(`No Issue Project configured for ${repositoryName()}`)
+  }
   const data = await graphql(
     `query(
       $organization: String!

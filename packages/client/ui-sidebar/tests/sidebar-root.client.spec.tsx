@@ -35,13 +35,15 @@ type AttentionSnapshot = Parameters<Parameters<SidebarRootComponentProps['useSes
 const noAttention: AttentionSnapshot = new Map()
 const useSessionStatus: SidebarRootComponentProps['useSessionStatus'] = selector => selector(noAttention)
 
-function mountShell({ collapsed = false, width = 300, shortcuts = [] }: {
+function mountShell({ collapsed = false, width = 300, shortcuts = [], brandAction }: {
   collapsed?: boolean
   width?: number
   shortcuts?: readonly ShortcutCatalogEntry[]
+  brandAction?: SidebarRootComponentProps['brandAction']
 } = {}) {
   const startSession = vi.fn()
   const toggleSidebar = vi.fn()
+  let projectsOwner: SidebarSectionOwnerProps | undefined
   let regionOwner: SidebarSectionOwnerProps | undefined
   let settingsOwner: SidebarSettingsOwnerProps | undefined
   let footerActionOwner: SidebarFooterActionOwnerProps | undefined
@@ -50,7 +52,7 @@ function mountShell({ collapsed = false, width = 300, shortcuts = [] }: {
   let current = { collapsed, width }
   const root = () => (
     <SidebarRoot
-      collapsed={current.collapsed} width={current.width}
+      collapsed={current.collapsed} width={current.width} {...(brandAction === undefined ? {} : { brandAction })}
       useSessions={neverHook} useSessionStatus={useSessionStatus} useSessionRetainInfo={neverHook}
       usePanelInfo={usePanelInfo} selectPanel={() => {}} usePanels={selector => selector([])} useShortcuts={selector => selector(shortcuts)}
       useResource={useResource} useWorkspaces={neverHook}
@@ -62,7 +64,7 @@ function mountShell({ collapsed = false, width = 300, shortcuts = [] }: {
         if (key === 'sidebar.brand.mark') return brandMark
         if (key === 'sidebar.brand.name') return brandName
         if (key === 'sidebar.toggle.badge') return null
-        if (key === 'sidebar.projects') return null
+        if (key === 'sidebar.projects') { projectsOwner = owner as SidebarSectionOwnerProps; return null }
         if (key === 'sidebar.settings') {
           settingsOwner = owner
           return <div data-testid="settings-seat" data-wide={owner.wide} />
@@ -80,6 +82,10 @@ function mountShell({ collapsed = false, width = 300, shortcuts = [] }: {
   return {
     startSession,
     toggleSidebar,
+    projectsOwner: () => {
+      if (projectsOwner === undefined) throw new Error('projects owner not rendered')
+      return projectsOwner
+    },
     regionOwner: () => {
       if (regionOwner === undefined) throw new Error('region owner not rendered')
       return regionOwner
@@ -313,4 +319,21 @@ it('uses the same effective sidebar binding for hover/focus hints and ARIA', () 
   expect(toggle.getAttribute('aria-keyshortcuts')).toBe('Meta+B')
   fireEvent.focus(toggle)
   expect(Array.from(screen.getByRole('tooltip').querySelectorAll('kbd'), key => key.textContent)).toEqual(['⌘', 'B'])
+})
+
+
+it('renders the identity without a New Session action when the deployment disables the brand shortcut', () => {
+  mountShell({ brandAction: 'none' })
+  expect(screen.getAllByRole('button', { name: 'New conversation' })).toHaveLength(1)
+  expect(screen.getByTestId('custom-brand-name').closest('[aria-hidden]')).toBeNull()
+})
+
+it('lets the projects slot expand a collapsed sidebar without toggling an already expanded one', () => {
+  const wide = mountShell()
+  wide.projectsOwner().expandSidebar()
+  expect(wide.toggleSidebar).not.toHaveBeenCalled()
+  cleanup()
+  const rail = mountShell({ collapsed: true })
+  rail.projectsOwner().expandSidebar()
+  expect(rail.toggleSidebar).toHaveBeenCalledOnce()
 })

@@ -282,7 +282,7 @@ export function gatesForMode(selected: Mode): Gate[] {
         pnpmScript('duplication', 'duplication'),
       ]
     case 'ci-coverage':
-      return coverageGates()
+      return [typertContractsGate(), ...coverageGates(['typert-contracts'])]
     case 'ci-unit':
       return ciUnitGates()
     case 'ci-bench':
@@ -379,7 +379,7 @@ function ciPrimaryGates(): Gate[] {
     pnpmScript('typecheck', 'typecheck:contracts-ready', { needs: ['typert-contracts'] }),
     lintGate({ needs: ['typert-contracts'] }),
     pnpmScript('duplication', 'duplication'),
-    ...coverageGates(),
+    ...coverageGates(['typert-contracts']),
     ...nodeCompatSmokeGates(),
     snapshotGate(),
     ...docSyncLeafGates({
@@ -679,7 +679,7 @@ function coverageWorkerArgs(): { instrumented: string[]; exempt: string[] } {
   }
 }
 
-function coverageGates(): Gate[] {
+function coverageGates(builtHostNeeds: string[] = []): Gate[] {
   const workers = coverageWorkerArgs()
   const partitions = parseCoveragePartitionCount(process.env[COVERAGE_PARTITIONS_ENV])
   const instrumented = partitions === undefined
@@ -700,7 +700,8 @@ function coverageGates(): Gate[] {
     })
   return [
     pnpmScript('native-system', 'build:native-system'),
-    { ...instrumented, needs: ['native-system'] },
+    // The Desktop browser-control subprocess imports emitted Host modules.
+    { ...instrumented, needs: ['native-system', ...builtHostNeeds] },
     pnpmExec('coverage-exempt-heavy', [
       'vitest',
       'run',
@@ -708,7 +709,7 @@ function coverageGates(): Gate[] {
       ...workers.exempt,
     ], {
       label: 'test:coverage-exempt-heavy',
-      needs: ['native-system'],
+      needs: ['native-system', ...builtHostNeeds],
     }),
   ]
 }

@@ -573,6 +573,19 @@ describe('gate graph validation', () => {
     },
   )
 
+  it.each(['ci-coverage', 'ci-primary', 'ci-linux-primary'] as const)(
+    'builds Host artifacts before both coverage consumers in %s', async (mode) => {
+      const gates = withPnpmEntrypoint(() => gatesForMode(mode))
+      expect(gates.filter(gate => gate.id === 'typert-contracts')).toHaveLength(1)
+      const results = await runGates(gates, 8, async gate =>
+        resultFor(gate, gate.id === 'typert-contracts' ? 'failed' : 'passed'))
+      for (const id of ['coverage', 'coverage-exempt-heavy']) {
+        expect(gates.find(gate => gate.id === id)?.needs).toContain('typert-contracts')
+        expect(results.find(result => result.gate.id === id)?.status).toBe('skipped')
+      }
+    },
+  )
+
   it('leaves the lane test budget to the inherited environment on both coverage gates', () => {
     // vitest.config.ts reads DSH_COVERAGE_TEST_TIMEOUT_MS per inline project
     // (coverageTestTimeoutOptions); a gate argument would add a second owner.

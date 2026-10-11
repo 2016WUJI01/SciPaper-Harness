@@ -154,6 +154,7 @@ describe('BrowserController', () => {
     controller.goBack()
     controller.goForward()
     controller.reload()
+    await controller.clearWorkspaceData()
     expect(controller.getSnapshot().frame.target).toBeUndefined()
     expect(store.getSnapshot().byTab[TAB]).toBeUndefined()
   })

@@ -1850,3 +1850,16 @@ it('supplies the accepted entry values and atomic mutation action to a custom pl
   fireEvent.click(screen.getByText('Save custom'))
   expect(mutate).toHaveBeenCalledWith([{ op: 'set', path: ['count'], value: 3 }], 7)
 })
+
+
+it('groups an installed optional non-research bundle with owned bundles and a nonoptional research package likewise', () => {
+  renderTab({ packages: [
+    pkg({ name: '@deepseek-ai/dsh-web-search-exa-bundle', installed: true, optional: true }),
+    pkg({ name: '@deepseek-ai/dsh-research-private', installed: true, optional: false }),
+  ] })
+  for (const name of ['@deepseek-ai/dsh-web-search-exa-bundle', '@deepseek-ai/dsh-research-private']) {
+    const card = document.querySelector(`[data-plugin-package="${name}"]`)!
+    expect(card.closest('[data-plugin-group]')?.getAttribute('data-plugin-group')).toBe('bundles')
+  }
+  expect(screen.queryByText(en.researchTitle)).toBeNull()
+})

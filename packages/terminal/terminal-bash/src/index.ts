@@ -127,10 +127,11 @@ async function startupSession(
     // function through the session, pin UTF-8 output before user input, and
     // accept only backend stdin_read evidence; echoed setup source containing
     // the printable prompt is not readiness. Follow-up sends bridge silence
-    // settlements during startup, while one absolute deadline bounds them.
+    // settlements during startup without resubmitting setup, while one absolute
+    // deadline bounds them.
     let viewport = ''
     for (;;) {
-      const first = viewport.length === 0
+      const first = startupOperation === undefined
       startupOperation = session.startSend({
         text: first ? ENCODING_PREAMBLE + PWSH_PROMPT_SETUP : '',
         submit: first,

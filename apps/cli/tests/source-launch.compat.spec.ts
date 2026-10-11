@@ -24,6 +24,31 @@ describe('dsh SOURCE launcher (node --import tsx/esm)', () => {
     expect(rootPackage.scripts?.dsh).toBe('node --import tsx/esm apps/cli/src/bin.ts')
   })
 
+  it.each(['migration', 'knowledge-migration'])('resolves research %s to source', async (entry) => {
+    const result = await execa(process.execPath, [
+      '--import', 'tsx/esm', '--input-type=module', '--eval',
+      `console.log(import.meta.resolve('@deepseek-ai/dsh-research-app/${entry}'))`,
+    ], {
+      cwd: repoRoot,
+      timeout: 25_000,
+      killSignal: 'SIGKILL',
+    })
+    expect(result.stdout).toBe(new URL(`../../../packages/bundle/research-app/src/${entry}.ts`, import.meta.url).href)
+  }, 30_000)
+
+  it('prints the CLI package release version', async () => {
+    const cliPackage = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8')) as {
+      readonly version: string
+    }
+    const result = await execa(process.execPath, ['--import', 'tsx/esm', dshSourceBin, '--version'], {
+      cwd: repoRoot,
+      timeout: 25_000,
+      killSignal: 'SIGKILL',
+    })
+    expect(result.stdout).toBe(cliPackage.version)
+    expect(result.stderr).toBe('')
+  }, 30_000)
+
   it('boots the source entry and requires a profile', async () => {
     const result = await execa(process.execPath, ['--import', 'tsx/esm', dshSourceBin], {
       cwd: repoRoot,

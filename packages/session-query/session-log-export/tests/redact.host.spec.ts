@@ -51,6 +51,25 @@ describe('exported log credential redaction', () => {
     expect(JSON.parse(exported.data.stream[0]?.texts.join('') ?? '') as { password: string }).toEqual({ password: '[REDACTED]' })
   })
 
+  it('keeps short labels, placeholders and redaction markers out of discovered credentials', () => {
+    const source = JSON.stringify({
+      text: "password: abc; password: <placeholder>; password: '[REDACTED]'",
+      password: '',
+      api_key: 'x'.repeat(4097),
+    })
+    const known = new Set<string>()
+    const result = redactSessionLog(source, known)
+    expect(known.size).toBe(0)
+    expect(result).toBe(source)
+  })
+
+  it('preserves unrelated stream chunks and serialized JSON while masking only overlapping fragments', () => {
+    const source = { password: 'fixture-secret', stream: ['before ', 'fixture-', 'secret', ' after'], arguments: '{"count":1}' }
+    expect(JSON.parse(redactSessionLog(JSON.stringify(source)))).toEqual({
+      password: '[REDACTED]', stream: ['before ', '********', '******', ' after'], arguments: '{"count":1}',
+    })
+  })
+
   it.each(['demo-"quote-secret', 'demo-\\slash-secret', 'demo-\nline-secret'])('redacts serialized tool arguments and compact fragments containing escaped credentials (%#)', (secret) => {
     const args = JSON.stringify({ password: secret, command: `use ${secret}`, ordinary: 'preserve this field' })
     const split = Math.floor(args.length / 2)

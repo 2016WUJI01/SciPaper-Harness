@@ -7,6 +7,8 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { performance } from 'node:perf_hooks'
 import { parseArgs } from 'node:util'
+import { JSON_SCHEMA, load as loadYaml } from 'js-yaml'
+import { intersects, satisfies, validRange } from 'semver'
 
 const TARGET_PACKAGE = '@deepseek-ai/dsh'
 const DEFAULT_TIMEOUT_MS = 300_000
@@ -52,8 +54,21 @@ interface RegistryVersion extends PackageManifest {
   readonly version: string
 }
 
-/** Package versions served by the local benchmark registry. */
-export type RegistryIndex = ReadonlyMap<string, ReadonlyMap<string, RegistryVersion>>
+interface PackageSelector {
+  readonly name: string
+  readonly range?: string
+}
+
+interface DependencyOverride {
+  readonly parent?: PackageSelector
+  readonly target: PackageSelector
+  readonly replacement: string
+}
+
+/** Real package versions and the installed policy used by the synthetic npm consumer. */
+export type RegistryIndex = ReadonlyMap<string, ReadonlyMap<string, RegistryVersion>> & {
+  readonly overrides?: Readonly<Record<string, string>>
+}
 
 /** Parsed command-line options for one benchmark invocation. */
 export interface BenchmarkOptions {
@@ -209,11 +224,94 @@ function addManifest(index: Map<string, Map<string, RegistryVersion>>, manifest:
   index.set(manifest.name, versions)
 }
 
+function readInstalledOverrides(
+  root: string,
+  workspaceByPath: ReadonlyMap<string, PackageManifest>,
+): Readonly<Record<string, string>> {
+  const path = resolve(root, 'pnpm-lock.yaml')
+  const lock: unknown = loadYaml(readFileSync(path, 'utf8'), { schema: JSON_SCHEMA })
+  if (lock === null || typeof lock !== 'object' || Array.isArray(lock)) {
+    throw new Error(`${path}: expected a lockfile object`)
+  }
+  const source: unknown = 'overrides' in lock ? lock.overrides : {}
+  if (source === null || typeof source !== 'object' || Array.isArray(source)) {
+    throw new Error(`${path}: overrides must be a selector-to-string mapping`)
+  }
+  const output: Record<string, string> = {}
+  for (const [selector, value] of Object.entries(source)) {
+    if (typeof value !== 'string') throw new Error(`${path}: override ${selector} must be a string`)
+    let replacement = value
+    if (value.startsWith('link:')) {
+      const target = workspaceByPath.get(resolve(root, value.slice('link:'.length), 'package.json'))
+      if (typeof target?.name !== 'string' || typeof target.version !== 'string') {
+        throw new Error(`${path}: override ${selector} links to an unindexed workspace: ${value}`)
+      }
+      const dependency = parseDependencyOverride(selector, value).target.name
+      replacement = dependency === target.name ? target.version : `npm:${target.name}@${target.version}`
+    } else if (value === '-' || value.startsWith('$') || /^(?:file|workspace|catalog):/.test(value)) {
+      throw new Error(`${path}: override ${selector} cannot be represented by the local npm registry: ${value}`)
+    }
+    output[selector] = replacement
+  }
+  return output
+}
+
+function parsePackageSelector(selector: string): PackageSelector {
+  const delimiter = selector.lastIndexOf('@')
+  return delimiter <= 0
+    ? { name: selector }
+    : { name: selector.slice(0, delimiter), range: selector.slice(delimiter + 1) }
+}
+
+function parseDependencyOverride(selector: string, replacement: string): DependencyOverride {
+  // pnpm's parent separator excludes semver comparators such as @>=1 and " >1".
+  const delimiter = selector.search(/[^ |@]>/)
+  return delimiter === -1
+    ? { target: parsePackageSelector(selector), replacement }
+    : {
+      parent: parsePackageSelector(selector.slice(0, delimiter + 1)),
+      target: parsePackageSelector(selector.slice(delimiter + 2)),
+      replacement,
+    }
+}
+
+function rangesIntersect(selector: string | undefined, range: string): boolean {
+  return !selector || selector === range
+    || (validRange(selector) !== null && validRange(range) !== null && intersects(selector, range))
+}
+
+function selectOverride(overrides: readonly DependencyOverride[], name: string, range: string): DependencyOverride | undefined {
+  return overrides.filter(rule => rule.target.name === name && rangesIntersect(rule.target.range, range))
+    .sort((a, b) => rangesIntersect(b.target.range, a.target.range ?? '') ? -1 : 1)[0]
+}
+
+function applyDependencyOverrides(manifest: RegistryVersion, overrides: readonly DependencyOverride[]): RegistryVersion {
+  const parents = overrides.filter(rule => rule.parent?.name === manifest.name
+    && (rule.parent.range === undefined || satisfies(manifest.version, rule.parent.range)))
+  const generic = overrides.filter(rule => rule.parent === undefined)
+  let output = structuredClone(manifest)
+  for (const field of ['dependencies', 'optionalDependencies', 'peerDependencies'] as const) {
+    for (const [name, range] of Object.entries(output[field] ?? {})) {
+      const rule = selectOverride(parents, name, range) ?? selectOverride(generic, name, range)
+      if (rule === undefined) continue
+      if (field === 'peerDependencies' && validRange(rule.replacement) === null) {
+        output = { ...output, dependencies: { ...output.dependencies, [name]: rule.replacement } }
+      } else {
+        const dependencies = output[field]
+        if (dependencies !== undefined) dependencies[name] = rule.replacement
+      }
+    }
+  }
+  return output
+}
+
 /**
  * Build registry metadata from installed external packages and workspace manifests.
+ * The current lockfile supplies version and direct-parent overrides, including links to indexed workspaces.
+ * Its policy applies even when workspace manifests come from a Git ref; unsupported replacements fail.
  * @param root - Repository root containing the pnpm virtual store.
  * @param ref - Optional Git ref used instead of working-tree workspace manifests.
- * @returns Package metadata served by the benchmark registry.
+ * @returns Unmodified external metadata, published workspace ranges, and installed dependency overrides.
  */
 export function buildRegistryIndex(root: string, ref?: string): RegistryIndex {
   const index = new Map<string, Map<string, RegistryVersion>>()
@@ -235,7 +333,11 @@ export function buildRegistryIndex(root: string, ref?: string): RegistryIndex {
     const copied = copyPublishedManifest(manifest, workspaceVersions)
     if (copied !== undefined) addManifest(index, copied)
   }
-  return index
+  const workspaceByPath = new Map(paths.flatMap((path, i) => {
+    const manifest = workspace[i]
+    return manifest === undefined ? [] : [[resolve(root, path), manifest] as const]
+  }))
+  return Object.assign(index, { overrides: readInstalledOverrides(root, workspaceByPath) })
 }
 
 function latestVersion(versions: ReadonlyMap<string, RegistryVersion>): string {
@@ -414,7 +516,9 @@ async function runNpm(
 
 /**
  * Ask npm to compute an install layout without downloading package archives.
- * @param index - Package metadata exposed through the local registry.
+ * Applies pnpm overrides to each manifest's direct edges without changing the source index or package versions.
+ * Parent selectors match only the immediate package, never its descendants.
+ * @param index - Package metadata and installed dependency policy exposed through the local registry.
  * @param dependencies - Root dependencies whose install layout npm computes.
  * @param timeoutMs - Hard wall-clock limit for the npm child process.
  * @param timeoutSubject - What the limit guards, named in the timeout diagnostic.
@@ -426,6 +530,7 @@ export async function resolveNpmPackageLock(
   timeoutMs: number,
   timeoutSubject = 'npm resolution',
 ): Promise<NpmPackageLockResolution> {
+  const overrides = Object.entries(index.overrides ?? {}).map(([selector, value]) => parseDependencyOverride(selector, value))
   let registryRequests = 0
   let archiveRequests = 0
   const unknownPackages = new Set<string>()
@@ -448,7 +553,7 @@ export async function resolveNpmPackageLock(
       return
     }
     const materialized = Object.fromEntries([...versions].map(([version, manifest]) => [version, {
-      ...manifest,
+      ...applyDependencyOverrides(manifest, overrides),
       dist: { tarball: `${registry}tarballs/${encodeURIComponent(name)}-${version}.tgz` },
     }]))
     const body = JSON.stringify({

@@ -166,6 +166,22 @@ describe('explicit stop tools', () => {
     task.settle({ status: 'killed' })
   })
 
+  it('renders confirmed independent targets and source-level failures', async () => {
+    const { ctx } = await setup()
+    try {
+      ctx.jobs.registerStopSource('complete', async () => ({ confirmed: true, targets: [{ id: 'done-1', status: 'cancelled', confirmed: true }] }))
+      ctx.jobs.registerStopSource('failed', async () => ({ confirmed: false, targets: [], error: 'supervisor unavailable' }))
+      const result = await call(ctx, 'job_stop_all', {})
+      expect(text(result)).toContain('complete: stop confirmed')
+      expect(text(result)).toContain('done-1 [status: cancelled]; stop confirmed')
+      expect(text(result)).toContain('failed: stop unconfirmed; supervisor unavailable')
+      expect(result.value).toMatchObject({ confirmed: false, sources: [
+        { source: 'complete', confirmed: true, targets: [{ id: 'done-1', confirmed: true }] },
+        { source: 'failed', error: 'supervisor unavailable' },
+      ] })
+    } finally { await ctx.fiber.dispose() }
+  })
+
   it('renders independent supervisor failures even when there are no ordinary jobs', async () => {
     const { ctx } = await setup()
     ctx.jobs.registerStopSource('experiment', async () => ({ confirmed: false, targets: [{ id: 'run-1', status: 'unknown', confirmed: false, error: 'transport failed' }] }))
@@ -715,10 +731,12 @@ describe('job_kill', () => {
 })
 
 describe('tool-owned UI presentation (presentCall)', () => {
-  it('renders generic cards for all three control tools', async () => {
+  it('renders generic cards for all four control tools', async () => {
     const { ctx } = await setup()
     expect(ctx.tools.get('job_output')?.presentCall?.({ job_id: 'bash-1' }))
       .toEqual({ card: 'generic', title: 'Read output from background job bash-1', kind: 'read', rawInput: 'bash-1' })
+    expect(ctx.tools.get('job_stop_all')?.presentCall?.({}))
+      .toEqual({ card: 'generic', title: 'Stop all background jobs', kind: 'execute' })
     expect(ctx.tools.get('job_list')?.presentCall?.({}))
       .toEqual({ card: 'generic', title: 'List background jobs', kind: 'read' })
     expect(ctx.tools.get('job_kill')?.presentCall?.({ job_id: 'subagent-2' }))

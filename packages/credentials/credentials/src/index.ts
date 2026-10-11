@@ -8,7 +8,7 @@
  * @module @deepseek-ai/dsh-credentials
  */
 
-import { Context, Service } from '@deepseek-ai/cordis'
+import { Context, Service, type Volatile } from '@deepseek-ai/cordis'
 import { brandString } from '@deepseek-ai/dsh-brand'
 import type { CredentialInfo, CredentialKey, CredentialRecord, CredentialRef } from './types.ts'
 
@@ -31,6 +31,30 @@ export function credentialRef(value: string): CredentialRef {
     throw new TypeError(`credential ref "${value}" must match ${String(REF_PATTERN)}`)
   }
   return brandString<CredentialRef>(value)
+}
+
+/**
+ * Capture a provider's configured key and environment fallback, with an optional
+ * managed resolver that reads the current credential on every invocation.
+ * @param ctx - consumer context; the credential provider is optional.
+ * @param configured - literal key or volatile reference, sampled once; an empty string suppresses the environment fallback.
+ * @param environmentName - credential reference validated when the managed resolver is invoked.
+ * @param readEnvironment - lazy fallback owned by the consumer's environment policy.
+ * @returns captured key (empty when absent), plus a resolver only when a credential provider is mounted.
+ */
+export function providerApiKeyOptions(
+  ctx: Context,
+  configured: string | Volatile<string | undefined> | undefined,
+  environmentName: string,
+  readEnvironment: () => string | undefined,
+): { apiKey: string; resolveApiKey?: () => Promise<string | undefined> } {
+  const credentials = ctx.get('credentials')
+  return {
+    apiKey: (typeof configured === 'string' ? configured : configured?.get()) ?? readEnvironment() ?? '',
+    ...credentials === undefined ? {} : {
+      resolveApiKey: async () => (await credentials.resolve(credentialRef(environmentName)))?.value,
+    },
+  }
 }
 
 /**

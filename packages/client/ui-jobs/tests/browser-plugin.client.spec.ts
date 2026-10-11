@@ -7,14 +7,28 @@ import { createSnapshotStore } from '@deepseek-ai/dsh-client-store'
 import { Context } from '@deepseek-ai/cordis'
 import { JobId } from '@deepseek-ai/dsh-jobs/brand'
 import { SessionId } from '@deepseek-ai/dsh-session/types'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { SlotRegistry } from '@deepseek-ai/dsh-client-ui-renderer/client'
-import { stubConfigForm } from '@deepseek-ai/dsh-client-test-runtime'
+import type { JobView } from '@deepseek-ai/dsh-api-job-controller/client'
+import { RemoteError, stubConfigForm } from '@deepseek-ai/dsh-client-test-runtime'
 import { apply as applyLocale, inject as localeInject } from '@deepseek-ai/dsh-client-locale/client'
 import { apply, inject } from '../src/client/index.ts'
 import type { JobListInjected } from '../src/client/JobListAction.tsx'
 import { apply as applyNode } from '../src/index.ts'
 import { en, NS, zh } from '../src/client/locales.ts'
+import type { StoredEntry } from '@deepseek-ai/dsh-client-ui-slots'
+
+/** The jobs contribution's concrete face inside the registry's erased record. */
+interface JobListEntry extends StoredEntry {
+  inject: () => JobListInjected & Record<string, unknown>
+}
+
+function jobListFace(ctx: Context): JobListInjected {
+  const entry = ctx.slots.entries('conversation.session.header.actions')
+    .find(candidate => candidate.options.id === 'job-list') as JobListEntry | undefined
+  if (entry?.inject === undefined) throw new Error('job-list entry registered no inject face')
+  return entry.inject()
+}
 
 /** Slot ledger reader: entry ids currently registered in the header list. */
 function headerEntryIds(ctx: Context): (string | undefined)[] {
@@ -80,12 +94,7 @@ describe('ui-jobs browser half', () => {
 
   it('exposes the jobs source and the roster, observation, and kill controls through the inject face', async () => {
     const { ctx } = await bench()
-    const entry = ctx.slots
-      .entries('conversation.session.header.actions')
-      .find(candidate => candidate.options.id === 'job-list')
-    const inject = entry?.inject as (() => JobListInjected) | undefined
-    if (inject === undefined) throw new Error('job-list entry registered no inject face')
-    const face = inject()
+    const face = jobListFace(ctx)
     expect(face.hooks.jobs).toBeDefined()
     const release = face.watchRows(SessionId('session'))
     expect(watched).toEqual(['session'])
@@ -133,4 +142,47 @@ describe('ui-jobs node half', () => {
     // The node half exists only so the plugin appears in the Loader tree.
     expect(applyNode).not.toThrow()
   })
+})
+
+
+it('reports every unconfirmed stop source while leaving verified settled work out of the failure list', async () => {
+  const { ctx, fiber } = await bench()
+  try {
+    const face = jobListFace(ctx)
+    const stop = vi.spyOn(ctx.jobs, 'stopAll')
+    stop.mockResolvedValueOnce({ ok: false, error: new RemoteError('gateway/internal', 'offline', {}) })
+    await expect(face.stopAllJobs(SessionId('session'))).resolves.toEqual({ confirmed: false, failures: ['offline'] })
+    const job = (id: string, status: JobView['status'], detail?: string): JobView => ({
+      id: JobId(id), kind: 'bash', label: id, status, ...(detail === undefined ? {} : { detail }),
+      startedAt: 0, output: { total: 0, earliest: 0 },
+    })
+    stop.mockResolvedValueOnce({ ok: true, value: { confirmed: false,
+      jobs: [
+        { job: job('error', 'completed'), error: 'observation failed' },
+        { job: job('running', 'running') },
+        { job: job('stopping', 'stopping') },
+        { job: job('orphan', 'killed', 'work may be orphaned') },
+        { job: job('settled', 'completed', 'done') },
+        { job: job('quiet', 'completed') },
+      ],
+      agents: [
+        { sessionId: SessionId('active'), status: 'running' },
+        { sessionId: SessionId('settled'), status: 'idle' },
+      ],
+      sources: [
+        { source: 'failed', confirmed: false, error: 'adapter failed', targets: [] },
+        { source: 'empty', confirmed: false, targets: [] },
+        { source: 'done', confirmed: true, targets: [] },
+        { source: 'targets', confirmed: false, targets: [
+          { id: 'active', confirmed: false, status: 'running' },
+          { id: 'done', confirmed: true, status: 'stopped' },
+          { id: 'failed', confirmed: true, status: 'stopped', error: 'observation failed' },
+        ] },
+      ],
+    } })
+    await expect(face.stopAllJobs(SessionId('session'))).resolves.toEqual({ confirmed: false, failures: [
+      'error: observation failed', 'running: running', 'stopping: stopping', 'orphan: work may be orphaned',
+      'active: running', 'failed: adapter failed', 'empty: stop unconfirmed', 'targets/active: running', 'targets/failed: observation failed',
+    ] })
+  } finally { await fiber.dispose(); await ctx.fiber.dispose() }
 })

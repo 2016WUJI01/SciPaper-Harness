@@ -47,7 +47,7 @@ kind: "package-reference"
 
 `assertReleasedV5Header` 要求版本为 5，执行身份为 `{ kind: 'local' }` 或 `{ kind: 'ssh', host }`；SSH 主机名不可为空，`cwd` 若存在则必须是 POSIX 绝对路径。为兼容旧调用点，缺省 `execution` 按本机处理，而 V5 编码会写入规范化身份。SSH `cwd` 不交给 V4 的路径校验，另按 POSIX 规则校验。
 
-`restoreReleasedV5Artifact` 应用已发布 V4 的事件关系规则，并校验 V5 delivery 标记所属的 Session 及之前的序号。`assertReleasedV5Relationships` 执行相同的关系校验，但不替换工件。这两个入口都不检查 SSH 连接，也不读取文件系统。
+`restoreReleasedV5Artifact` 先校验 V5 delivery 标记所属的 Session 及之前的序号，再应用共享的 V4 事件关系规则。历史 delivery 标记保留各自代际的校验。`assertReleasedV5Relationships` 执行相同的关系校验，但不替换工件。这两个入口都不检查 SSH 连接，也不读取文件系统。
 
 <a id="further-exploration"></a>
 ## 进一步阅读

@@ -118,6 +118,37 @@ describe('recall', () => {
     expect(search.nodes.find(node => node.kind === 'paper')?.url).toMatch(/^https:\/\//)
   })
 
+  it('opens a selected pattern with every matching paper and preserves absent links and empty stories', async () => {
+    const file = structuredClone(BUILTIN)
+    delete file.paperUrl
+    file.papers[0]!.story = ''
+    const { base } = await builtinBase(file)
+    const root = await temp()
+    const page = await base.view(root, { pattern: 'ai:pattern:pattern_0' })
+    expect(page.nodes.filter(node => node.kind === 'pattern').map(node => node.id)).toEqual(['ai:pattern:pattern_0'])
+    expect(page.nodes.filter(node => node.kind === 'paper').map(node => node.id)).toEqual(['ai:paper:p0', 'ai:paper:p1'])
+    expect(page.nodes.find(node => node.id === 'ai:paper:p0')).toMatchObject({ summary: 'Block sparse attention kernels idea' })
+    expect(page.nodes.find(node => node.id === 'ai:paper:p0')).not.toHaveProperty('url')
+    expect(page.edges).toContainEqual({ from: 'ai:paper:p0', to: 'ai:paper:p1', kind: 'similar' })
+    expect((await base.view(root, { pattern: 'ai:pattern:missing' })).nodes).toEqual([])
+    expect((await base.view(root, { query: 'approximations' })).nodes.map(node => node.id)).toContain('ai:pattern:pattern_0')
+    expect((await base.view(root, { query: 'unclustered' })).nodes).toEqual([])
+    expect(await base.graphOf(root, 'ai')).toEqual(file)
+    expect(await base.graphOf(root, 'project')).toBeUndefined()
+    await write(join(root, PROJECT_GRAPH), JSON.stringify(file))
+    expect(await base.graphOf(root, 'project')).toEqual(file)
+  })
+
+  it('adds unavailable-graph warnings to a semantic novelty report without a pre-existing note', async () => {
+    const root = await temp()
+    const base = new KnowledgeBase(join(root, 'missing.gz')); bases.push(base)
+    const report = await base.novelty(root, 'story.json', 'report.json', embedder(), signal, 1_000_000,
+      { claim: 'Sparse attention for long context', references: [{ title: 'Reference', text: 'Sparse attention kernels' }] })
+    expect(report.basis).toContain('semantic (fake-embed)')
+    expect(report.note).toContain('Unavailable graphs: ai:')
+    expect(JSON.parse(await readFile(join(root, 'report.json'), 'utf8'))).toEqual(report)
+  })
+
   it('ranks patterns lexically, says why each was recalled, and lists the closest papers with links', async () => {
     const { base } = await builtinBase()
     const root = await temp()

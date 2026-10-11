@@ -135,6 +135,17 @@ describe('progress merges report by report', () => {
     expect(third.phases).not.toHaveProperty('retired')
   })
 
+  it('retains completed and skipped check coverage with its explanation', () => {
+    const mode = shipped.resolve({ mode: 'spark-to-paper', route: 'data' })
+    const result = mergeProgress(undefined, report(mode, 'all', {
+      checks: [{ id: 'compile', status: 'skipped', reason: 'No TeX runtime' }, { id: 'cite', status: 'passed' }],
+    }), mode)
+    expect(result.findings.compile).toMatchObject({ status: 'skipped', reason: 'No TeX runtime' })
+    expect(result.findings.cite).toMatchObject({ status: 'passed' })
+    expect(result.findings.cite).not.toHaveProperty('reason')
+    expect(result.findings.prose).not.toHaveProperty('status')
+  })
+
   it('starts afresh for another mode or route, and takes a report without a mode as the mode it ran under', () => {
     const data = shipped.resolve({ mode: 'spark-to-paper', route: 'data' })
     const before = mergeProgress(undefined, report(data, 'all', { checkedAt: T1 }), data)
@@ -213,6 +224,17 @@ describe('where a project stands', () => {
     expect(standing).not.toHaveProperty('checkedAt')
     expect(standing.phases[0]).not.toHaveProperty('checkedAt')
     expect(probe.listed).toBe(0)
+  })
+
+  it('tells the person to run a check whose coverage was skipped', async () => {
+    const p = project('spark-to-paper', 'proposal')
+    p.progress = {
+      mode: p.mode, route: p.route, findings: {},
+      phases: { plan: { done: false, unmet: ['skipped:template-lint'], checkedAt: T1 } },
+    }
+    const standing = await projectStanding(p, shipped.resolve(p), files(Date.parse(T1)))
+    expect(standing.phases[0]?.hints).toEqual([{ en: 'Run Template check', zh: '完成「模板检查」检查' }])
+    expect(standing.finished).toBe(false)
   })
 
   it('marks done, current and pending phases with the pack\'s hints, and a recorded deferral', async () => {

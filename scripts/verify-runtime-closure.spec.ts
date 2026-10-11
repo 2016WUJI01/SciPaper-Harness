@@ -176,4 +176,18 @@ describe('verifyRuntimeClosure', () => {
     expect(result.workspacePackageCount).toBe(1)
     expect(result.failures).toEqual(['runtime -> @scope/root -> @scope/required'])
   })
+
+  it('follows the CLI application dependency graph to required workspace peers', async () => {
+    const root = fixture({
+      'python/sdk-runtime/package.json': { name: 'runtime', dependencies: { '@scope/cli': 'workspace:*' } },
+      'python/sdk-runtime/platforms.json': platforms,
+      'apps/cli/package.json': { name: '@scope/cli', dependencies: { '@scope/bundle': 'workspace:*' } },
+      'preset:minimal': '[]\n',
+    })
+    workspace(root, '@scope/bundle', { peerDependencies: { '@scope/required': 'workspace:*' } })
+    workspace(root, '@scope/required', {})
+    const result = await verifyRuntimeClosure(root)
+    expect(result.workspacePackageCount).toBe(2)
+    expect(result.failures).toEqual(['runtime -> @scope/cli -> @scope/bundle -> @scope/required'])
+  })
 })

@@ -2,10 +2,91 @@ import { Context } from '@deepseek-ai/cordis'
 import { posix } from 'node:path'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { FileReferenceCandidate } from '@deepseek-ai/dsh-file-reference/types'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { SessionFileReferences } from '../src/file-references.ts'
 
 describe('SessionFileReferences', () => {
+  const contexts: Context[] = []
+  afterEach(async () => {
+    await Promise.all(contexts.splice(0).map(ctx => ctx.fiber.dispose()))
+  })
+
+  function remoteHarness(root = '/srv/study') {
+    const ctx = new Context()
+    contexts.push(ctx)
+    const remoteFs = {
+      resolve: vi.fn(async (path: string) => ({ targetKey: path })),
+      lstat: vi.fn(async () => ({ type: 'directory' })),
+      contains: vi.fn(() => true),
+      listDir: vi.fn(async (): Promise<{ name: string; type: string }[]> => []),
+    }
+    ctx.provide('agentPresets', { serviceFor: () => remoteFs } as never)
+    const adapter = new SessionFileReferences(ctx)
+    const agent = Object.assign({} as Agent, { ctx, session: { header: { cwd: root, execution: { kind: 'ssh', host: 'campus' } } } })
+    return { remoteFs, list: (query: string, signal = new AbortController().signal) => adapter.list(agent, query, signal) }
+  }
+
+  it('rejects malformed queries and excluded remote directories before filesystem access', async () => {
+    const { list, remoteFs } = remoteHarness()
+    for (const query of ['x'.repeat(4097), 'a\0b', 'a\rb', 'a\nb', 'node_modules/file', '.git/config']) {
+      await expect(list(query)).resolves.toEqual([])
+    }
+    expect(remoteFs.resolve).not.toHaveBeenCalled()
+    const relative = remoteHarness('relative/root')
+    await expect(relative.list('')).resolves.toEqual([])
+    expect(relative.remoteFs.resolve).not.toHaveBeenCalled()
+  })
+
+  it('contains disappearing parents and subdirectories while surfacing root failures', async () => {
+    const { list, remoteFs } = remoteHarness()
+    remoteFs.lstat.mockRejectedValueOnce(new Error('directory disappeared'))
+    await expect(list('src/file')).resolves.toEqual([])
+    expect(remoteFs.listDir).not.toHaveBeenCalled()
+    remoteFs.contains.mockReturnValueOnce(false)
+    await expect(list('src/file')).resolves.toEqual([])
+    remoteFs.listDir.mockRejectedValueOnce(new Error('subdirectory disappeared'))
+    await expect(list('src/file')).resolves.toEqual([])
+    remoteFs.listDir.mockRejectedValueOnce(new Error('remote unavailable'))
+    await expect(list('')).rejects.toThrow('remote unavailable')
+  })
+
+  it('preserves cancellation during parent lookup and directory listing', async () => {
+    const { list, remoteFs } = remoteHarness()
+    const lookup = new AbortController()
+    remoteFs.lstat.mockImplementationOnce(async () => {
+      lookup.abort(new Error('cancelled lookup'))
+      throw new Error('transport cancelled')
+    })
+    await expect(list('src/', lookup.signal)).rejects.toThrow('cancelled lookup')
+    const listing = new AbortController()
+    remoteFs.listDir.mockImplementationOnce(async () => {
+      listing.abort(new Error('cancelled listing'))
+      throw new Error('transport cancelled')
+    })
+    await expect(list('', listing.signal)).rejects.toThrow('cancelled listing')
+  })
+
+  it('ranks exact, prefix, and substring matches deterministically and caps the result', async () => {
+    const { list, remoteFs } = remoteHarness()
+    remoteFs.listDir.mockResolvedValueOnce([
+      { name: 'later-test', type: 'file' }, { name: 'test-z', type: 'file' },
+      { name: 'test', type: 'file' }, { name: 'test-dir', type: 'directory' },
+      { name: 'test-a', type: 'file' }, { name: 'test-a', type: 'file' },
+      { name: 'unrelated', type: 'file' }, { name: 'test-link', type: 'symlink' },
+    ])
+    await expect(list('src\\test')).resolves.toEqual([
+      { path: 'src/test', kind: 'file' }, { path: 'src/test-dir', kind: 'directory' },
+      { path: 'src/test-a', kind: 'file' }, { path: 'src/test-a', kind: 'file' },
+      { path: 'src/test-z', kind: 'file' }, { path: 'src/later-test', kind: 'file' },
+    ])
+    remoteFs.listDir.mockResolvedValueOnce([{ name: '.env', type: 'file' }, { name: 'plain', type: 'file' }])
+    await expect(list('.')).resolves.toEqual([{ path: '.env', kind: 'file' }])
+    remoteFs.listDir.mockResolvedValueOnce(Array.from({ length: 24 }, (_, index) => ({ name: `file-${String(index).padStart(2, '0')}`, type: 'file' })))
+    const capped = await list('file-')
+    expect(capped).toHaveLength(20)
+    expect(capped.at(-1)).toEqual({ path: 'file-19', kind: 'file' })
+  })
+
   it('delegates the resolved Agent, query, and cancellation signal unchanged', async () => {
     const ctx = new Context()
     const candidates: FileReferenceCandidate[] = [{ path: 'src', kind: 'directory' }]

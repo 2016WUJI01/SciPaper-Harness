@@ -1,10 +1,10 @@
 /**
  * Node 22 startup-output smoke for the shipped Web CLI composition.
  *
- * Only the dedicated Node compatibility gate opts this test in after building
- * both artifacts; ordinary Vitest inventory deterministically skips it.
+ * Only the dedicated Node compatibility gate opts the process smoke in after
+ * building both artifacts; ordinary Vitest still checks the source patch layers.
  * The child runs built artifacts under plain Node with the real shipped
- * web profile (dsh-base + dsh-web-app bundle patches, auto-initialized).
+ * web profile (dsh-base + dsh-web-app + dsh-research-app, auto-initialized).
  * Its URL line follows the settled profile boot; SIGTERM then exercises the
  * shipped quiescent disposer.
  */
@@ -21,10 +21,11 @@ import { describe, expect, it } from 'vitest'
 const repoRoot = fileURLToPath(new URL('../../../', import.meta.url))
 const builtBin = join(repoRoot, 'apps/cli/lib/bin.js')
 const webDist = join(repoRoot, 'apps/web/dist/index.html')
-// Full-text session search is off in the base patch (`openAt: never`); the web
-// restatement opens it at the first search, which keeps node:sqlite out of startup.
+// Base and generic Web keep full-text search off; the research layer opens it
+// at the first search, which keeps node:sqlite out of startup.
 const baseConfigPath = join(repoRoot, 'packages/bundle/base/cordis.patch.yml')
 const webConfigPath = join(repoRoot, 'packages/bundle/web-app/cordis.patch.yml')
+const researchConfigPath = join(repoRoot, 'packages/bundle/research-app/cordis.patch.yml')
 const requireBuiltArtifacts = process.env.DSH_REQUIRE_BUILT_CLI_SMOKE === '1'
 
 interface ConfigRow {
@@ -99,22 +100,28 @@ function runBuiltWeb(cwd: string): Promise<{ stdout: string; stderr: string; cod
   })
 }
 
-describe.skipIf(!requireBuiltArtifacts)('built CLI lazy-search startup', () => {
-  it('boots and disposes the shipped composition with full-text search opened only at the first search', async () => {
-    expect(existsSync(builtBin), `missing built CLI ${resolve(builtBin)}; run pnpm build`).toBe(true)
-    expect(existsSync(webDist), `missing Web dist ${resolve(webDist)}; run pnpm run build:web`).toBe(true)
+describe('CLI lazy-search startup', () => {
+  it('enables full-text search at the first search only in the research patch layer', async () => {
     const baseRows = (yaml.load(await readFile(baseConfigPath, 'utf8'), { schema: configSchema }) as PatchEntry[])
       .flatMap(entry => entry.insert ?? [entry])
     const webRows = (yaml.load(await readFile(webConfigPath, 'utf8'), { schema: configSchema }) as PatchEntry[])
       .flatMap(entry => entry.insert ?? [entry])
+    const researchRows = (yaml.load(await readFile(researchConfigPath, 'utf8'), { schema: configSchema }) as PatchEntry[])
+      .flatMap(entry => entry.insert ?? [entry])
     const baseRow = baseRows.find(row => row.id === 'session-query-sqlite')
     const webRow = webRows.find(row => row.id === 'session-query-sqlite')
+    const researchRow = researchRows.find(row => row.id === 'session-query-sqlite')
     expect(baseRow?.config?.openAt).toBe('never')
     expect(baseRow?.disabled).toBeUndefined()
-    // The research edition's web restatement opts in without opening SQLite at startup.
-    expect(webRow?.config?.openAt).toBe('first-search')
+    expect(webRow?.config?.openAt).toBe('never')
     expect(webRow?.disabled).toBeUndefined()
+    expect(researchRow?.config?.openAt).toBe('first-search')
+    expect(researchRow?.disabled).toBeUndefined()
+  })
 
+  it.skipIf(!requireBuiltArtifacts)('boots and disposes the shipped composition without opening SQLite', async () => {
+    expect(existsSync(builtBin), `missing built CLI ${resolve(builtBin)}; run pnpm build`).toBe(true)
+    expect(existsSync(webDist), `missing Web dist ${resolve(webDist)}; run pnpm run build:web`).toBe(true)
     const cwd = await mkdtemp(join(tmpdir(), 'dsh-cli-lazy-search-'))
     try {
       const result = await runBuiltWeb(cwd)

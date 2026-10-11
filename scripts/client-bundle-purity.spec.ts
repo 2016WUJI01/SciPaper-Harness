@@ -20,7 +20,7 @@ interface CssModulePlugin {
 
 interface SourceMapPlugin {
   name: string
-  load?: (id: string) => Promise<unknown>
+  load?: (this: { addWatchFile: (id: string) => void }, id: string) => Promise<unknown>
 }
 
 interface InputIsolationPlugin {
@@ -154,6 +154,13 @@ describe('client bundle purity gate', () => {
     expect(resolveId('@deepseek-ai/dsh-output-retention')).toBeNull()
     expect(() => resolveId('@deepseek-ai/dsh-spill-policy')).toThrow(/purity/)
     expect(() => resolveId('@deepseek-ai/dsh-spill-policy/notice/internal')).toThrow(/purity/)
+  })
+
+  it('admits the pure research board selectors without its Host implementation', () => {
+    expect(resolveId('@deepseek-ai/dsh-research-workbench/board-values')).toBeNull()
+    expect(() => resolveId('@deepseek-ai/dsh-research-workbench')).toThrow(/purity/)
+    expect(() => resolveId('@deepseek-ai/dsh-research-workbench/board-values/internal')).toThrow(/purity/)
+    expect(() => resolveId('@deepseek-ai/dsh-research-workbench/src/board.ts')).toThrow(/purity/)
   })
 
   it('lets exact generated Remote contributions inline without admitting their package implementation', () => {
@@ -402,10 +409,12 @@ describe('client bundle debug artifacts', () => {
       writeFileSync(`${entry}.map`, JSON.stringify(map))
       writeFileSync(source, 'export const marker: true = true\n')
 
-      await expect(sourceMapPlugin().load!(entry)).resolves.toEqual({
+      const addWatchFile = vi.fn()
+      await expect(sourceMapPlugin().load!.call({ addWatchFile }, entry)).resolves.toEqual({
         code: 'export const marker = true',
-        map: { ...map, sourcesContent: ['export const marker: true = true\n'] },
+        map: JSON.stringify({ ...map, sourcesContent: ['export const marker: true = true\n'] }),
       })
+      expect(addWatchFile.mock.calls).toEqual([[entry], [`${entry}.map`]])
     } finally {
       rmSync(root, { recursive: true, force: true })
     }

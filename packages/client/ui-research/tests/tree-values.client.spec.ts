@@ -345,3 +345,14 @@ describe('searching the tree', () => {
     expect(bounded.hasMore).toBe(true)
   })
 })
+
+it('keeps ordinary conversations outside their home separate and remembers a collapsed ordinary group', () => {
+  const model = deriveTree({
+    ...sources({ projects: [], sessions: [session('inside', '/home/conversations/one'), session('outside', '/elsewhere')],
+      workspaces: [workspace('ordinary', '/home/conversations/one', ['inside']), workspace('elsewhere', '/elsewhere', ['outside'])] }),
+    conversationHome: '/home/conversations',
+  })
+  expect(model.loose.map(item => item.id)).toEqual(['inside'])
+  expect(model.folders.map(item => item.workspaceId)).toEqual(['elsewhere'])
+  expect(flattenTree(model, { [treeKey.loose]: false }).map(item => item.key)).toEqual([treeKey.loose, treeKey.others])
+})

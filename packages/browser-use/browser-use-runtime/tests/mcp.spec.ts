@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, readdir, rm, symlink, unlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, relative } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -156,6 +156,31 @@ it('keeps each Session browser profile inside the product home across restarts',
     else process.env.DSH_HOME = previous
   }
 })
+
+it.each(['browser-profiles', 'browser-profiles/playwright-mcp'])(
+  'rejects a %s directory redirected outside the product home before writing a profile',
+  async (segment) => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-browser-profile-escape-'))
+    roots.push(root)
+    const home = join(root, 'home')
+    const outside = join(root, 'outside')
+    await mkdir(home)
+    await mkdir(outside)
+    if (segment.includes('/')) await mkdir(join(home, 'browser-profiles'))
+    const link = join(home, segment)
+    await symlink(outside, link, 'junction')
+    const previous = process.env.DSH_HOME
+    process.env.DSH_HOME = home
+    try {
+      expect(() => sessionBrowserProfile('playwright-mcp', 'escaped-session')).toThrow('browser profile must remain inside the product home')
+      expect(await readdir(outside)).toEqual([])
+    } finally {
+      if (previous === undefined) delete process.env.DSH_HOME
+      else process.env.DSH_HOME = previous
+      await unlink(link)
+    }
+  },
+)
 
 it('waits for SystemPrompt and ToolRuntime before reserving the provider', async () => {
   const ctx = new Context()

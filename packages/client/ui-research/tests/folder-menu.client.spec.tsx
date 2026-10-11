@@ -48,6 +48,7 @@ async function flush(): Promise<void> {
 interface Setup {
   current?: string | undefined
   cwd?: string
+  execution?: { kind: 'ssh'; host: string }
   open?: boolean
   canReveal?: boolean
   projects?: ResearchProject[] | null
@@ -84,7 +85,7 @@ function setup(parts: Setup = {}) {
   document.body.append(anchor)
   const props = (overrides: Partial<Setup> = {}): FolderMenuProps => {
     const selected = 'current' in overrides ? overrides.current : current
-    const byId = selected === undefined ? {} : { [selected]: { cwd: overrides.cwd ?? parts.cwd ?? DRAFT_ROOT } }
+    const byId = selected === undefined ? {} : { [selected]: { cwd: overrides.cwd ?? parts.cwd ?? DRAFT_ROOT, execution: parts.execution } }
     const now = { ...list, current: selected, byId }
     if (overrides.open !== undefined) open = overrides.open
     return {
@@ -302,4 +303,10 @@ describe('what a chosen folder turned out to be', () => {
     // A portal list with no anchor rectangle stays unplaced.
     expect(menus()[0]!.style.visibility).toBe('hidden')
   })
+})
+
+it('never offers to reveal a remote conversation path in the local file manager', () => {
+  const view = setup({ current: 'remote', cwd: '/srv/project', execution: { kind: 'ssh', host: 'lab' }, projects: [], canReveal: true })
+  expect(menus()).toEqual([])
+  expect(view.reveal).not.toHaveBeenCalled()
 })

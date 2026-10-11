@@ -9,6 +9,7 @@
  * @module @deepseek-ai/dsh-tool-fs-search/glob
  */
 
+import { sep } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { GenericCallView, SearchResultView, ToolResult } from '@deepseek-ai/dsh-tools'
@@ -120,39 +121,41 @@ export interface GlobSample {
   total: number
 }
 
+/** Native paths use the local separator; SSH paths also accept POSIX slashes. */
+function isPathSeparator(character: string | undefined): boolean {
+  return character === '/' || character === sep
+}
+
 /** Remove the displayed search-root prefix before choosing a top-level group. */
 function relativeToSearchRoot(path: string, root: string): string {
-  if (root === '.') return /^\.[\\/]/u.test(path) ? path.slice(2) : path
+  if (root === '.') return path[0] === '.' && isPathSeparator(path[1]) ? path.slice(2) : path
   let rootEnd = root.length
-  while (rootEnd > 0 && /[\\/]/u.test(root[rootEnd - 1] as string)) rootEnd -= 1
+  while (rootEnd > 0 && isPathSeparator(root[rootEnd - 1])) rootEnd -= 1
   const trimmedRoot = root.slice(0, rootEnd)
   if (trimmedRoot.length === 0) return stripLeadingSeparators(path)
   if (path === trimmedRoot) return ''
-  if (path.startsWith(`${trimmedRoot}/`) || path.startsWith(`${trimmedRoot}\\`)) {
+  if (path.startsWith(trimmedRoot) && isPathSeparator(path[trimmedRoot.length])) {
     return path.slice(trimmedRoot.length + 1)
   }
   return path
 }
 
-/** Strip path separators from either the local or the SSH execution host. */
+/** Strip path separators without consuming POSIX filename backslashes. */
 function stripLeadingSeparators(path: string): string {
   let start = 0
-  while (path[start] === '/' || path[start] === '\\') start += 1
+  while (isPathSeparator(path[start])) start += 1
   return path.slice(start)
 }
 
 /**
- * The leading path segment of one display path — the top-level entry, relative
- * to the search root, that the path sits under. A path with no separator is its
- * own top-level entry. Leading separators are stripped first so an absolute path
- * (one outside the workdir, which {@link toWorkdirRelative} leaves untouched)
- * groups by its first real name instead of collapsing every such path into one
- * empty group.
+ * The leading path segment relative to the search root. Absolute paths outside
+ * the workdir group by their first real name rather than their empty root.
  */
 function topLevelSegment(path: string): string {
   const trimmed = stripLeadingSeparators(path)
-  const cut = trimmed.search(/[\\/]/u)
-  return cut === -1 ? trimmed : trimmed.slice(0, cut)
+  let cut = 0
+  while (cut < trimmed.length && !isPathSeparator(trimmed[cut])) cut += 1
+  return trimmed.slice(0, cut)
 }
 
 /**

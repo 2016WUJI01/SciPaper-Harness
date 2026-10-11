@@ -14,6 +14,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   ApiSessionAgentController,
   ApiSessionCwdConflict,
+  ApiSessionExecutionConflict,
   ApiSessionNotFound,
   ApiSessionSubagentOwnership,
   inspectApiSession,
@@ -484,5 +485,62 @@ describe('ApiSession create or adoption', () => {
     writeFileSync(file, 'not a directory')
     await expect(agents.ensureSession(SessionId('mkdir-failure'), join(file, 'child'), false))
       .rejects.toThrow('failed to ensure project directory')
+  })
+})
+
+
+describe('SSH Agent composition and execution identity', () => {
+  it('requires the remote workspace, runtime, matching preset, and preset registry', async () => {
+    const { ctx, agents } = await harness()
+    const execution = { kind: 'ssh' as const, host: 'lab' }
+    await expect(agents.composeAgent(undefined, execution)).rejects.toThrow('remote workspace path')
+    await expect(agents.composeAgent(undefined, execution, '/srv/study')).rejects.toThrow('runtime is unavailable')
+    const ensure = vi.fn(async () => 'remote-lab')
+    ctx.provide('remoteWorkspacePresets', { ensure } as never)
+    await expect(agents.composeAgent('other', execution, '/srv/study')).rejects.toThrow('does not match')
+    await expect(agents.composeAgent(undefined, execution, '/srv/study')).rejects.toThrow('needs the Agent preset registry')
+    const mount = vi.fn(async () => {})
+    ctx.provide('agentPresets', { resolve: async (id: string) => ({ id }), mount } as never)
+    const composition = await agents.composeAgent('remote-lab', execution, '/srv/study')
+    expect(composition.agentPreset).toBe('remote-lab')
+    const remote = agent(ctx, { ...header('composed-ssh', '/srv/study'), execution })
+    await composition.setup(ctx, remote)
+    expect(mount).toHaveBeenCalledWith(ctx, 'remote-lab')
+    expect(ensure).toHaveBeenCalledWith({ host: 'lab', path: '/srv/study' })
+    expect(agents.selectionFor(remote).current).toEqual({ provider: 'fixture', model: 'fixture-model' })
+  })
+
+  it('creates an SSH Agent without creating a Host directory and preserves its execution location', async () => {
+    const { ctx, agents } = await harness()
+    const execution = { kind: 'ssh' as const, host: 'lab' }
+    ctx.provide('remoteWorkspacePresets', { ensure: async () => 'remote-lab' } as never)
+    ctx.provide('agentPresets', { resolve: async (id: string) => ({ id }), mount: async () => {} } as never)
+    const meta = { ...header('created-ssh', '/remote-only/study'), execution }
+    const created = agent(ctx, meta)
+    const create = vi.spyOn(ctx.agents, 'create').mockResolvedValue({ agent: created, dispose: async () => {} })
+    await expect(agents.ensureSession(meta.id, meta.cwd!, false, undefined, execution)).resolves.toBe(created)
+    expect(create).toHaveBeenCalledWith(expect.objectContaining({ meta: { cwd: meta.cwd, execution, agentPreset: 'remote-lab' } }))
+  })
+
+  it('refuses to adopt a live or persisted Session from another execution host', async () => {
+    const live = await harness()
+    const meta = { ...header('live-ssh'), execution: { kind: 'ssh' as const, host: 'alpha' } }
+    const current = agent(live.ctx, meta)
+    await live.ctx.agents.register(current)
+    await expect(live.agents.ensureSession(meta.id, meta.cwd!, false, undefined, { kind: 'ssh', host: 'beta' }))
+      .rejects.toBeInstanceOf(ApiSessionExecutionConflict)
+    await expect(live.agents.ensureSession(meta.id, meta.cwd!, false)).rejects.toBeInstanceOf(ApiSessionExecutionConflict)
+    await expect(live.agents.ensureSession(meta.id, meta.cwd!, false, undefined, meta.execution)).resolves.toBe(current)
+    const persisted = await harness()
+    const stored = { ...header('stored-ssh'), execution: { kind: 'ssh' as const, host: 'alpha' } }
+    providePersistence(persisted.ctx, { list: async () => [stored], inspect: async () => ({ meta: stored, events: [] }) })
+    await expect(persisted.agents.ensureSession(stored.id, stored.cwd!, true, undefined, { kind: 'ssh', host: 'beta' }))
+      .rejects.toBeInstanceOf(ApiSessionExecutionConflict)
+    const legacy = await harness()
+    const old = { ...header('legacy-local') }
+    delete old.execution
+    const local = unpublishedAgent(legacy.ctx, old)
+    await legacy.ctx.agents.register(local)
+    await expect(legacy.agents.ensureSession(old.id, old.cwd!, false)).resolves.toBe(local)
   })
 })

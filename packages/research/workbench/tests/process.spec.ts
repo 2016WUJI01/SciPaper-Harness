@@ -22,7 +22,7 @@ describe('child processes run bounded, without a shell and without model credent
     const failed = await node('process.stderr.write("bad"); process.exit(3)')
     expect(failed).toMatchObject({ code: 3, stderr: 'bad' })
     expect((await node('process.stdout.write(process.env.RESEARCH_FLAG ?? "")', { env: { RESEARCH_FLAG: 'on' } })).stdout).toBe('on')
-    expect((await node('process.stdout.write(process.env.PYTHONUTF8)')).stdout).toBe('1')
+    expect((await node('process.stdout.write(process.env.PYTHONUTF8)', { ordinaryExecutablePath: true })).stdout).toBe('1')
   })
 
   it('never hands secrets from the parent environment to a child', async () => {

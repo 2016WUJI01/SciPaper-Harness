@@ -510,6 +510,26 @@ describe('session.export download endpoint', () => {
     expect(logText(after)).toContain('fixture-appended-password-2178')
   })
 
+  it('refuses a descendant whose committed prefix shrinks after discovery and closes its handle', async () => {
+    const before = log('child-a', sid('session-root'), [textEvent('discovered prefix')])
+    let descendantReads = 0
+    const closes = vi.fn(async () => {})
+    const api = await buildApi({}, [node('child-a')], {
+      open: async (id) => {
+        if (id === sid('session-root')) return readHandle(log('session-root'))
+        descendantReads += 1
+        const handle = readHandle(descendantReads === 1 ? before : log('child-a', sid('session-root'), []))
+        return { ...handle, close: closes }
+      },
+    })
+    const response = await api.downloads.sessionLog(
+      { sessionId: sid('session-root'), includeDescendants: true }, new AbortController().signal,
+    )
+    await expect(responseBytes(response)).rejects.toThrow('changed its committed log prefix during export')
+    expect(descendantReads).toBe(2)
+    expect(closes).toHaveBeenCalledTimes(2)
+  })
+
   it('reads a cold log without asking the live-session store to flush', async () => {
     const flush = vi.fn(async () => true)
     const stored = log('session-root')

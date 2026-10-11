@@ -260,3 +260,23 @@ it('words the view in the reader\'s language', async () => {
   expect(view.getByRole('button', { name: zh.memStartNew })).toBeTruthy()
   expect(view.getAllByRole('switch').map(item => item.getAttribute('aria-label'))).toEqual(['文献库', '已完成的实验', '实验环境', '写作偏好'])
 })
+
+it('keeps a saved carry choice when an earlier read fails and accepts the next revision read', async () => {
+  const h = harness()
+  const view = render(<MemoryView {...h.props} />)
+  await settle()
+  const reading = Promise.withResolvers<ResearchResponse>()
+  view.rerender(<MemoryView {...h.props} project={{ ...h.project, revision: h.project.revision + 1 }}
+    run={request => request.action === 'memory' ? reading.promise : h.run(request)} />)
+  fireEvent.click(view.getByRole('switch', { name: en.memKindWriting }))
+  await settle()
+  expect(view.getByRole('switch', { name: en.memKindWriting }).getAttribute('aria-checked')).toBe('false')
+  reading.reject(new Error('Old read failed'))
+  await settle()
+  expect(view.queryByRole('alert')).toBeNull()
+  expect(view.getByRole('switch', { name: en.memKindWriting }).getAttribute('aria-checked')).toBe('false')
+  h.run.mockResolvedValueOnce({ message: 'new revision', memory })
+  view.rerender(<MemoryView {...h.props} project={{ ...h.project, revision: h.project.revision + 2 }} />)
+  await settle()
+  expect(view.getByRole('switch', { name: en.memKindWriting }).getAttribute('aria-checked')).toBe('true')
+})

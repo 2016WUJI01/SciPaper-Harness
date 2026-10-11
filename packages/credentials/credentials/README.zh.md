@@ -60,6 +60,8 @@ await ctx.credentials.unset(ref)                       // no-op when absent; sam
 
 用 `set` 存储密钥、用 `unset` 移除、用 `describe` 检查状态、在操作需要时用 `resolve` 读取当前值。`describe` 报告密钥是否已设置、来自哪里、能否写入——它绝不返回值。
 
+`providerApiKeyOptions(ctx, configured, environmentName, readEnvironment)` 组装 Exa、Perplexity 等提供方使用的选项。它只读取一次字面量或 volatile 密钥，仅在值缺失时惰性读取由调用方控制的环境回退，均缺失时使用空密钥。显式空字符串会阻止环境回退。挂载凭据提供方时，返回的 `resolveApiKey` 会在每次调用时校验引用并读取当前托管值；值缺失和提供方失败都保留给调用方处理。
+
 ### 存储、更新与移除记录
 
 插件按 `<scope>/<id>` 寻址每条记录——自身注册名加一个自选 id，例如提供方路由键——并读取、修改或移除它所持有的内容：

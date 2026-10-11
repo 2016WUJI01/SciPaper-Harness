@@ -232,8 +232,6 @@ type BodyProps = Pick<
   rows: TreeRow[]
   /** The conversation the main column shows; undefined while a panel covers it. */
   selectedId: string | undefined
-  /** The record has arrived, so an empty tree means no research yet. */
-  ready: boolean
   canReveal: boolean
   openDialog(dialog: TreeDialog): void
 }
@@ -458,7 +456,6 @@ function TreeBody(props: BodyProps): ReactNode {
       {items.map(({ row, view }) =>
         <TreeItem key={row.key} row={row} view={view} focusable={row.key === tabKey} t={t} onFocused={setFocusKey} />)}
     </div>
-    {props.ready && rows.length === 0 && <p className={styles.empty}>{t('treeEmpty')}</p>}
     <span className={styles.fade} />
   </div>
 }
@@ -824,7 +821,7 @@ export function ResearchTree(props: ResearchTreeProps): ReactNode {
     t, actions: props.actions, openSession: props.openSession, openWorkspace: props.openWorkspace,
     startSession: props.startSession, startOrdinary: props.startOrdinary,
     run: props.run, reveal: props.reveal, archiveConversation: props.archiveConversation, removeFolder: props.removeFolder,
-    model, rows, selectedId, ready: snapshot !== null, canReveal, openDialog: setDialog,
+    model, rows, selectedId, canReveal, openDialog: setDialog,
   }
   const expandAll = (keys: readonly string[]): void => { for (const key of keys) props.actions.setExpanded(key, true) }
   const openResearch = (research: TreeResearch): void => {

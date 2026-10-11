@@ -16,10 +16,12 @@ jobs:
     name: Issue policy
     runs-on: ubuntu-latest
     steps:
-      - name: Check out trusted policy
+      # Project credentials are available only with the configured repository's trusted policy.
+      # Forks run the event revision with the read-only repository token and no App token.
+      - name: Check out policy
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          ref: ${{ github.event.repository.default_branch }}
+          ref: ${{ github.repository == 'deepseek-harness/deepseek-harness' && github.event.repository.default_branch || github.sha }}
           persist-credentials: false
       - name: Determine policy eligibility
         id: preflight
@@ -40,7 +42,7 @@ jobs:
           fi
       - name: Create Project read token
         id: app-token
-        if: ${{ steps.preflight.outputs.needs-project == 'true' }}
+        if: ${{ github.repository == 'deepseek-harness/deepseek-harness' && steps.preflight.outputs.needs-project == 'true' }}
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
         with:
           client-id: ${{ vars.DSH_ISSUE_APP_CLIENT_ID }}

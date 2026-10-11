@@ -272,3 +272,47 @@ describe('current version', () => {
     expect(view.container.textContent).toBe('')
   })
 })
+
+
+it('starts remote access, copies invitations, reports clipboard failures, and resets feedback on refresh', async () => {
+  const state = createSnapshotStore<DesktopRemoteView>({ presentation: { phase: 'idle' }, failed: false, refreshing: false })
+  const run = vi.fn()
+  const writeText = vi.fn(async (_text: string) => {})
+  const clipboard = Object.getOwnPropertyDescriptor(navigator, 'clipboard')
+  Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } })
+  try {
+    render(<DesktopRemoteRow {...kit} t={t} useRemoteAccess={bindSnapshotSelector(state)} run={run} />)
+    expect(screen.getByText(en['remote.idle'])).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: en['remote.start'] }))
+    expect(run).toHaveBeenCalledWith('start')
+    const ready = { phase: 'ready' as const, expiresAt: Date.now() + 60_000 }
+    act(() => { state.set({ presentation: ready, failed: false, refreshing: false }) })
+    fireEvent.click(screen.getByRole('button', { name: en['remote.copy'] }))
+    expect(writeText).not.toHaveBeenCalled()
+    act(() => { state.set({ presentation: { ...ready, pairingUrl: 'https://research.example/?pair=first' }, failed: false, refreshing: false }) })
+    fireEvent.click(screen.getByRole('button', { name: en['remote.copy'] }))
+    expect(await screen.findByRole('button', { name: en['remote.copied'] })).toBeTruthy()
+    expect(writeText).toHaveBeenLastCalledWith('https://research.example/?pair=first')
+    writeText.mockRejectedValueOnce(new Error('clipboard denied'))
+    fireEvent.click(screen.getByRole('button', { name: en['remote.copied'] }))
+    expect((await screen.findByRole('alert')).textContent).toBe(en['remote.copyFailed'])
+    act(() => { state.set({ presentation: { ...ready, pairingUrl: 'https://research.example/?pair=second' }, failed: false, refreshing: true }) })
+    expect(screen.queryByRole('alert')).toBeNull()
+    expect(screen.getByRole('button', { name: en['remote.copy'] }).hasAttribute('disabled')).toBe(true)
+    expect(screen.getByRole('button', { name: en['remote.refresh'] }).hasAttribute('disabled')).toBe(true)
+    act(() => { state.set({ presentation: { phase: 'stopping' }, failed: true, refreshing: false }) })
+    expect(screen.getByRole('button', { name: en['remote.stop'] }).hasAttribute('disabled')).toBe(true)
+    expect(screen.getByRole('alert').textContent).toBe(en['remote.failed'])
+    for (const failure of [undefined, 'download'] as const) {
+      act(() => {
+        state.set({ presentation: { phase: 'error', ...(failure === undefined ? {} : { failure }) }, failed: false, refreshing: false })
+      })
+      expect(screen.getByText(en[`remote.error.${failure ?? 'connection'}`])).toBeTruthy()
+    }
+    act(() => { state.set({ presentation: { phase: 'ready' }, failed: false, refreshing: false }) })
+    expect(screen.getByText(en['remote.expired'])).toBeTruthy()
+  } finally {
+    if (clipboard === undefined) Reflect.deleteProperty(navigator, 'clipboard')
+    else Object.defineProperty(navigator, 'clipboard', clipboard)
+  }
+})

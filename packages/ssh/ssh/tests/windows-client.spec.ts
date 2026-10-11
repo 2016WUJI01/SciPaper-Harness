@@ -26,9 +26,13 @@ class Child extends EventEmitter {
   readonly stderr = new PassThrough()
   readonly signals: string[] = []
   killed = false
+  ignoreTerm = false
+  readonly terminating = Promise.withResolvers<undefined>()
   kill(signal = 'SIGTERM'): boolean {
     this.signals.push(signal)
     this.killed = true
+    this.terminating.resolve(undefined)
+    if (this.ignoreTerm && signal === 'SIGTERM') return true
     queueMicrotask(() => {
       this.stdin.destroy()
       this.stdout.destroy()
@@ -57,7 +61,7 @@ function records(): PasswordRecords {
       if (next !== undefined) stored.set(key, next)
       return next
     },
-    deleteRecord: (key) => { stored.delete(key); return Promise.resolve() },
+    deleteRecord: (key) => { stored.delete(key); return Promise.resolve(undefined) },
   }
 }
 
@@ -177,7 +181,7 @@ describe('Windows SSH client', () => {
     transport.authenticate.mockResolvedValue(authenticated)
     await service.connectStream({ path: '/tmp/dsh-ssh-remote/stdout', capability: 'b'.repeat(64) })
     stream.kill('SIGTERM')
-    await Promise.resolve()
+    await Promise.resolve(undefined)
     await expect(service.dispose()).resolves.toBeUndefined()
   })
 
@@ -213,4 +217,50 @@ describe('Windows SSH client', () => {
     await expect(service.ready).rejects.toMatchObject({ name: 'SshFailure', kind: 'unsupported' })
     expect(transport.spawn).not.toHaveBeenCalled()
   })
+
+  it('propagates a stream child spawn error through the authentication transport', async () => {
+    const { service, stream } = await setup()
+    await service.ready
+    const entered = Promise.withResolvers<undefined>()
+    transport.authenticate.mockImplementation((raw: PassThrough) => new Promise((_resolve, reject) => {
+      raw.once('error', reject)
+      entered.resolve(undefined)
+    }))
+    const connecting = service.connectStream({ path: '/tmp/dsh-ssh-remote/stdout', capability: 'b'.repeat(64) })
+    const failure = new Error('stream ssh spawn failed')
+    const rejected = expect(connecting).rejects.toBe(failure)
+    await entered.promise
+    stream.emit('error', failure)
+    await rejected
+    await stream.terminating.promise
+    expect(stream.signals).toEqual(['SIGTERM'])
+  })
+
+  it('does not terminate an already killed stream again when authentication rejects', async () => {
+    const { service, stream } = await setup()
+    await service.ready
+    const failure = new Error('stream terminated while authenticating')
+    transport.authenticate.mockImplementation(() => { stream.kill(); return Promise.reject(failure) })
+    await expect(service.connectStream({ path: '/tmp/dsh-ssh-remote/stdout', capability: 'b'.repeat(64) })).rejects.toBe(failure)
+    expect(stream.signals).toEqual(['SIGTERM'])
+  })
+
+  it('force-kills a stream child that ignores termination and awaits its exit', async () => {
+    const { service, stream } = await setup()
+    await service.ready
+    transport.authenticate.mockResolvedValue(new PassThrough())
+    await service.connectStream({ path: '/tmp/dsh-ssh-remote/stdout', capability: 'b'.repeat(64) })
+    stream.ignoreTerm = true
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      let disposed = false
+      const disposal = service.dispose().then(() => { disposed = true })
+      await stream.terminating.promise
+      expect(disposed).toBe(false)
+      await vi.advanceTimersByTimeAsync(1000)
+      await disposal
+      expect(stream.signals.at(-1)).toBe('SIGKILL')
+    } finally { stream.ignoreTerm = false; stream.kill(); vi.useRealTimers() }
+  })
+
 })

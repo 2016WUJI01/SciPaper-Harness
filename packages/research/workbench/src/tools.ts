@@ -37,17 +37,16 @@ function disjointObjects(variants: z.core.JSONSchema.JSONSchema[]): boolean {
 
 /** Overlapping object unions need an accepting envelope; Zod retains the alternative-specific requirements. */
 function objectUnion(variants: z.core.JSONSchema.JSONSchema[]): z.core.JSONSchema.JSONSchema {
-  const fields = new Map<string, Array<z.core.JSONSchema.JSONSchema | boolean>>()
+  const fields = new Map<string, [z.core.JSONSchema.JSONSchema | boolean, ...Array<z.core.JSONSchema.JSONSchema | boolean>]>()
   for (const branch of variants) {
     for (const [key, value] of Object.entries(branch.properties ?? {})) {
-      const values = fields.get(key) ?? []
-      if (!values.some(existing => JSON.stringify(existing) === JSON.stringify(value))) values.push(value)
-      fields.set(key, values)
+      const values = fields.get(key)
+      if (values === undefined) fields.set(key, [value])
+      else if (!values.some(existing => JSON.stringify(existing) === JSON.stringify(value))) values.push(value)
     }
   }
   const properties = Object.fromEntries([...fields].map(([key, values]): [string, z.core.JSONSchema.JSONSchema | boolean] => {
     const first = values[0]
-    if (first === undefined) throw new Error('Research object union has an empty property')
     if (values.length === 1) {
       // Another alternative can ignore this field, so its literal is not an envelope-wide requirement.
       if (typeof first !== 'boolean' && variants.some(branch => !Object.hasOwn(branch.properties ?? {}, key))) {
@@ -66,8 +65,13 @@ function objectUnion(variants: z.core.JSONSchema.JSONSchema[]): z.core.JSONSchem
   }
 }
 
-/** Project command validators into the tool DSL; numeric, length and overlapping-union constraints remain enforced by Zod. */
-function valueSchema(source: z.core.JSONSchema.JSONSchema | boolean, nullAsAbsent = false): ValueSchemaSpec {
+/**
+ * Project a validator's JSON schema into the tool DSL; numeric, length and overlapping-union constraints remain in Zod.
+ * @param source - JSON schema produced by the command validator.
+ * @param nullAsAbsent - whether optional object fields also accept null for later normalization.
+ * @returns the model-visible input schema.
+ */
+export function valueSchema(source: z.core.JSONSchema.JSONSchema | boolean, nullAsAbsent = false): ValueSchemaSpec {
   if (typeof source === 'boolean') return { type: 'json' }
   const variants = source.anyOf ?? source.oneOf
   if (variants) {
@@ -106,8 +110,14 @@ function valueSchema(source: z.core.JSONSchema.JSONSchema | boolean, nullAsAbsen
   }
 }
 
-/** Select an action's own field so the advertised object agrees with its execution validator. */
-function structured(action: string, field: string, description: string): ValueSchemaSpec {
+/**
+ * Select an action's own field so the advertised object agrees with its execution validator.
+ * @param action - research command discriminant.
+ * @param field - structured property on that command.
+ * @param description - model-visible purpose of the property.
+ * @returns the projected field schema with its description.
+ */
+export function structured(action: string, field: string, description: string): ValueSchemaSpec {
   const option = commandSchema.options.find(item => item.shape.action.value === action)
   if (!option) throw new Error(`Unknown research action: ${action}`)
   const fields: Record<string, z.ZodType> = option.shape

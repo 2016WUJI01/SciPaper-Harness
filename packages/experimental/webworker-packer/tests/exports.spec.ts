@@ -67,3 +67,27 @@ it('rejects a missing runtime target beside a types condition', (test) => {
   const options = fixture(test, { types: './lib/index.d.ts', default: './lib/missing.js' })
   expect(() => packVfsImage(options)).toThrow('cannot resolve')
 })
+
+it('preserves SSH process bytes and rejects importing them as a Worker module', (test) => {
+  const options = fixture(test, { default: './lib/contract.js' })
+  const root = options.resolveFrom
+  const helper = "#!/usr/bin/env node\nawait import('node:net');\n"
+  writeFileSync(join(root, 'package.json'), JSON.stringify({
+    name: '@deepseek-ai/dsh-ssh', type: 'module', files: ['lib'],
+    exports: { '.': './lib/index.js', './helper': './lib/helper.js', './client': './lib/client.js' },
+  }))
+  writeFileSync(join(root, 'lib/helper.js'), helper)
+  writeFileSync(join(root, 'lib/client.js'), 'export const page = true')
+  const input = {
+    ...options, config: "- name: '@deepseek-ai/dsh-ssh'\n",
+    workspaces: new Map([['@deepseek-ai/dsh-ssh', root]]),
+  }
+  writeFileSync(join(root, 'lib/index.js'), "export const helper = import.meta.resolve('@deepseek-ai/dsh-ssh/helper')")
+  const result = packVfsImage(input)
+  expect(new TextDecoder().decode(result.files['node_modules/@deepseek-ai/dsh-ssh/lib/helper.js'])).toBe(helper)
+  expect(new TextDecoder().decode(result.files['node_modules/@deepseek-ai/dsh-ssh/lib/client.js']))
+    .toContain('export const page = true\n//# sourceURL=')
+  expect(result.transform.visited).toBe(1)
+  writeFileSync(join(root, 'lib/index.js'), "import '@deepseek-ai/dsh-ssh/helper'")
+  expect(() => packVfsImage(input)).toThrow('standalone process asset, not a Worker module')
+})

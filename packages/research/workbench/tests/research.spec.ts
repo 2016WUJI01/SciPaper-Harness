@@ -54,6 +54,15 @@ describe('artifacts are recorded, never refused for being edited elsewhere', () 
     expect(Buffer.from(files['more.bib']!).toString()).toContain('More')
   })
 
+  it('ignores absolute bibliography paths and missing parent-relative files instead of searching another directory', async () => {
+    const p = await project()
+    await mkdir(join(p.root, 'paper'), { recursive: true })
+    await writeFile(join(p.root, 'paper/main.tex'), String.raw`\documentclass{article}\bibliography{/outside/refs,C:/outside/refs,../missing}`)
+    await mkdir(join(p.root, 'nested'))
+    await writeFile(join(p.root, 'nested/missing.bib'), '@misc{private, title={Unrelated source}}')
+    expect(await bibliographyFiles(p.root, await flattenPaper(p.root, 'paper/main.tex', 10000))).toEqual([])
+  })
+
   it('rejects protected and metadata imports reached through directory links', async () => {
     const p = await project()
     const home = await temporary('research-protected-')

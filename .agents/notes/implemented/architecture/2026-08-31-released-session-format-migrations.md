@@ -107,9 +107,11 @@ Preparation forwards cancellation through source reads and observes it at the ex
 
 The Stage pipeline ends at one prepared current artifact. [Historical Session read preparation](2026-09-05-read-only-session-migration-preparation.md) defines how read open consumes that artifact immediately while write open performs encode, verification, and publication before returning append access.
 
-The bulk V4 migration command shares one JSONL persistence Context across a bounded job queue, retaining the backend’s two-Worker verification limit and cache for reusing recently decoded logs. A child’s concurrent publication can change its parent’s selected child generation; the ordinary revision check refuses that attempt. The command defers only this source-change error for one sequential retry after the initial queue drains, collecting fresh evidence without relaxing publication checks or retrying unrelated failures.
+The bulk current-format migration command shares one JSONL persistence Context across a bounded job queue, retaining the backend’s two-Worker verification limit and cache for reusing recently decoded logs. A child’s concurrent publication can change its parent’s selected child generation; the ordinary revision check refuses that attempt. The command defers only this source-change error for one sequential retry after the initial queue drains, collecting fresh evidence without relaxing publication checks or retrying unrelated failures.
 
 ### Durable format and publication rules
+
+The recorded-session corpus retains every supported generation from the V3 baseline to the preceding writer as direct migration input. The earlier V3-or-current wording left existing V4 inputs undeclared after the V5 writer bump, contradicting the no-refresh-on-writer-bump rule. The bounded range resolves that conflict without rewriting committed fixtures: every source generation still requires direct coverage, V0–V2 remain explicitly pinned, retired-tool pins do not establish migration coverage, and unknown future generations remain rejected.
 
 Canonical filenames encode physical format generation: v0 is `session.jsonl[.zstd]` and positive generations use `session.vN.jsonl[.zstd]`. Migration never moves, replaces, or deletes a committed generation and writes only the final current target; intermediate versions exist only as stage state.
 

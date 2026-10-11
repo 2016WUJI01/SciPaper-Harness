@@ -103,6 +103,8 @@ TeX 优先使用显式绑定的 `texBin`，其次是已完成安装的托管发�
 
 编辑器保存旧版本时，服务先持久化磁盘上的外部编辑修订，再报告冲突；重新读取会得到该修订，中断留下的历史文件也会保留。实验即使在提交返回时已经完成，也会收集证据；等待和后台观测还会补收此前已完成但尚未收集证据的运行。
 
+结构化工具输入由 `src/tools.ts` 中的命令校验器投影而来。存在重叠的对象分支共用可接受各分支字段的 schema；工具执行时，原始 Zod 校验器继续约束每个分支。看板中可为空的可选字段会先规范化为缺省，再进行校验。
+
 | 源码 | 内容 |
 |---|---|
 | [`src/index.ts`](src/index.ts) | 服务本体：项目生命周期、新研究草稿、移出列表、命令分派、项目队列、运行观测，以及每段对话的权限预设 |
@@ -135,6 +137,7 @@ TeX 优先使用显式绑定的 `texBin`，其次是已完成安装的托管发�
 | [`src/literature.ts`](src/literature.ts) | Crossref、OpenAlex 与 arXiv 元数据；开放获取 PDF 查找 |
 | [`src/images.ts`](src/images.ts) | 生图（OpenAI 图像接口，默认 gpt-image-2，带参考图时走 edits；也支持返回图片的对话接口）与来自 ar5iv 的参考图 |
 | [`src/board.ts`](src/board.ts) | 实验看板：保存的布局、机器探针、进度记录和采集脚本，在后台读取 |
+| [`src/board-values.ts`](src/board-values.ts) | 浏览器安全的 `./board-values` 选择函数：解析运行 id、名称与种子引用，选择最新运行并匹配通配名称；宿主采集与客户端渲染共用，不含运行时导入 |
 | [`runtime/board_probe.py`](runtime/board_probe.py) | 只用标准库的探针，报告一台机器的 GPU、处理器、内存、磁盘以及各运行的进度记录 |
 | [`src/gallery.ts`](src/gallery.ts) | 配图库：按筛选条件、关键词和可选的标题嵌入检索；图片按需取回并缓存 |
 | [`runtime/figure-gallery/`](runtime/figure-gallery) | 来自 Top-Conf Figure Gallery 的约 3,500 张顶会 Figure 1 的索引，由 [`scripts/build_figure_gallery.py`](scripts/build_figure_gallery.py) 构建；不含图片 |

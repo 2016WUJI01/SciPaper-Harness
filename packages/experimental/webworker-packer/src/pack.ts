@@ -26,7 +26,7 @@ import picomatch from 'picomatch'
 import yaml from 'js-yaml'
 import { entryListSchema } from '@deepseek-ai/cordis-plugin-include'
 import { WRAPPER_CONTRACT, type ImageFiles, type TransformOutcome } from './transform-image.ts'
-import { EXCLUDE, EXCLUDE_WORKSPACE, IMAGE_ENTRY_SEEDS, PAGE_ASSETS } from './rules.ts'
+import { EXCLUDE, EXCLUDE_WORKSPACE, IMAGE_ENTRY_SEEDS, PAGE_ASSETS, PROCESS_ASSETS } from './rules.ts'
 
 export { DEFAULT_ROOT } from '@deepseek-ai/dsh-experimental-webworker-runtime'
 
@@ -51,6 +51,9 @@ const workspaceExcluded = picomatch([...EXCLUDE, ...EXCLUDE_WORKSPACE], { dot: t
 
 /** Page-asset matcher over image paths ({@link PAGE_ASSETS}). */
 const pageAsset = picomatch([...PAGE_ASSETS], { dot: true })
+
+/** Process artifacts retain their exact bytes for hashing and remote installation. */
+const processAsset = picomatch([...PROCESS_ASSETS], { dot: true })
 
 /** One directory tree to copy into the image at a caller-selected mount. */
 export interface ImageTree {
@@ -109,7 +112,7 @@ export interface PackResult {
   readonly missing: readonly string[]
   /** Executable scripts dropped from the image. */
   readonly executables: readonly string[]
-  /** Page bundles left out of the transform; like every JavaScript entry they carry the trailing debugger name. */
+  /** Page bundles left out of the transform; they carry the trailing debugger name. */
   readonly pageBundles: readonly string[]
   /** JavaScript entries the image carries. */
   readonly javascriptEntries: number
@@ -292,10 +295,9 @@ interface SweepOutcome {
  * resolution cannot drift, and a request that resolves nowhere — an undeclared
  * or missing dependency — fails the pack rather than the boot.
  *
- * Two entry classes stay out of the walk by rule: page assets
- * ({@link PAGE_ASSETS}) are evaluated by the page's module system, and
- * non-JavaScript entries always stay because data reads go through fs paths
- * this pass cannot see.
+ * Page assets ({@link PAGE_ASSETS}) are evaluated by the page's module system.
+ * Process assets ({@link PROCESS_ASSETS}) and non-JavaScript entries retain their
+ * bytes because consumers read them through filesystem paths.
  * @param files - Candidate entries after the publish-view filter.
  * @param options - Pack options carrying the sweep roots.
  * @param rootPackages - Roster package names from the workspace.
@@ -381,8 +383,8 @@ function sweepImage(
     staticModulePrefixes: Object.fromEntries(Object.keys(MODULE_PROXY_PREFIXES).map(name => [name, stub])),
   })
 
-  const queue: { specifier: string; from: string; importer: string; meta?: boolean }[] = (options.entries ?? IMAGE_ENTRY_SEEDS)
-    .map(specifier => ({ specifier, from: root, importer: 'worker assembly entry' }))
+  const queue: { specifier: string; from: string; importer: string; meta?: boolean; exportRoot?: boolean }[] =
+    (options.entries ?? IMAGE_ENTRY_SEEDS).map(specifier => ({ specifier, from: root, importer: 'worker assembly entry' }))
   for (const name of rootPackages) {
     const manifestBytes = files[`node_modules/${name}/package.json`]
     if (manifestBytes === undefined) continue // materialize already reported it under `missing`
@@ -400,7 +402,7 @@ function sweepImage(
         .filter(([key, target]) => key.startsWith('.') && !key.includes('*') && !isDeclarationOnlyExport(target))
         .map(([key]) => key)
     for (const subpath of subpaths) {
-      queue.push({ specifier: subpath === '.' ? name : `${name}/${subpath.slice(2)}`, from: root, importer: `workspace face ${name}` })
+      queue.push({ specifier: subpath === '.' ? name : `${name}/${subpath.slice(2)}`, from: root, importer: `workspace face ${name}`, exportRoot: true })
     }
   }
 
@@ -431,12 +433,16 @@ function sweepImage(
     }
     if (resolution.kind === 'static') continue
     const path = resolution.path
+    const key = path.slice(root.length + 1)
+    if (processAsset(key) && entry.meta !== true && entry.exportRoot !== true) {
+      failures.push(`${importer}: "${specifier}" is a standalone process asset, not a Worker module`)
+      continue
+    }
     if (seen.has(path)) continue
     seen.add(path)
-    const key = path.slice(root.length + 1)
     const bytes = files[key]
     if (bytes === undefined) continue
-    if (!/\.[cm]?js$/.test(key) || pageAsset(key)) {
+    if (!/\.[cm]?js$/.test(key) || pageAsset(key) || processAsset(key)) {
       reached.set(key, bytes)
       continue
     }
@@ -462,8 +468,8 @@ function sweepImage(
   let dropped = 0
   for (const [name, bytes] of Object.entries(files)) {
     const isJs = /\.[cm]?js$/.test(name)
-    if (!isJs || pageAsset(name)) {
-      swept[name] = isJs ? nameForDebugger(bytes, debuggerName(name), decoder, encoder) : bytes
+    if (!isJs || pageAsset(name) || processAsset(name)) {
+      swept[name] = isJs && !processAsset(name) ? nameForDebugger(bytes, debuggerName(name), decoder, encoder) : bytes
       if (isJs) javascriptEntries += 1
       continue
     }
@@ -485,10 +491,10 @@ function sweepImage(
 }
 
 /**
- * Drop executable scripts from the image.
+ * Drop executable scripts unless their exact bytes are a declared process asset.
  *
  * A shebang says "program", not "module": nothing in a browser can spawn one and no
- * consumer reads their bytes (the packages that expose a launcher path are replaced
+ * consumer reads their bytes, except for {@link PROCESS_ASSETS} (packages that expose a launcher path are replaced
  * by stubs that answer with a string). They are also the one place top-level `await`
  * appears in the closure, which a CommonJS body cannot express.
  * @param files - Image entries, mutated.
@@ -498,7 +504,7 @@ function dropExecutables(files: ImageFiles): string[] {
   const decoder = new TextDecoder()
   const dropped: string[] = []
   for (const [name, bytes] of Object.entries(files)) {
-    if (!/\.[cm]?js$/.test(name)) continue
+    if (!/\.[cm]?js$/.test(name) || processAsset(name)) continue
     if (decoder.decode(bytes.subarray(0, 2)) !== '#!') continue
     dropped.push(name)
     // eslint-disable-next-line @typescript-eslint/no-dynamic-delete -- the image is a plain path map

@@ -28,12 +28,14 @@ describe('Workspace Files Session scope lookup', () => {
     const liveId = SessionId('live-subagent')
     const coldId = SessionId('cold-subagent')
     const fallbackId = SessionId('cold-without-cwd')
+    const remoteId = SessionId('cold-ssh')
     const missingId = SessionId('missing')
     const liveRoot = resolve('live-workspace')
     const coldRoot = resolve('cold-workspace')
     const fallbackRoot = resolve('fallback-workspace')
     const stat = vi.fn(async (id: SessionId) => {
       if (id === coldId) return { header: header(coldId, coldRoot) }
+      if (id === remoteId) return { header: { ...header(remoteId, '/srv/lab'), execution: { kind: 'ssh' as const, host: 'lab' } } }
       if (id === fallbackId) return { header: header(fallbackId) }
       return undefined
     })
@@ -62,7 +64,8 @@ describe('Workspace Files Session scope lookup', () => {
       await expect(lookup.resolve(coldId)).resolves.toEqual({ sessionId: coldId, workspaceRoot: coldRoot })
       await expect(lookup.resolve(fallbackId)).resolves.toEqual({ sessionId: fallbackId, workspaceRoot: fallbackRoot })
       await expect(lookup.resolve(missingId)).resolves.toBeUndefined()
-      expect(stat.mock.calls.map(([id]) => id)).toEqual([coldId, fallbackId, missingId])
+      await expect(lookup.resolve(remoteId)).resolves.toEqual({ sessionId: remoteId, workspaceRoot: '/srv/lab', execution: { kind: 'ssh', host: 'lab' } })
+      expect(stat.mock.calls.map(([id]) => id)).toEqual([coldId, fallbackId, missingId, remoteId])
 
       await workspaceFiles.dispose()
       expect(ctx.typert.lookups.get('workspaceFileScope')).toBeUndefined()

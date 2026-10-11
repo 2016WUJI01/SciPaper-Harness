@@ -53,6 +53,12 @@ function provider(overrides: Partial<HttpFetchLimits> = {}): HttpFetchProvider {
   return new HttpFetchProvider({ ...limits, ...overrides })
 }
 
+it('rejects a PDF that exceeds its byte budget before parsing', async () => {
+  handler = (_req, res) => { res.writeHead(200, { 'content-type': 'application/pdf' }); res.end('123456789') }
+  await expect(provider({ maxResponseBytes: 4 }).fetch({ url: base }))
+    .rejects.toMatchObject({ code: 'WEB_FETCH_TOO_LARGE' })
+})
+
 describe('policy helpers', () => {
   it('validates scheme, credentials, and length', () => {
     expect(parseFetchUrl('https://example.com/preflight').pathname).toBe('/preflight')
@@ -562,6 +568,14 @@ describe('HttpFetchProvider body cancellation on error paths', () => {
       close: async () => {},
     })
   }
+
+  it('rejects HTTPS downgrade redirects and closes their bodies', async () => {
+    const { response, cancelled } = fakeResponse({ status: 302, headers: {}, location: 'http://page.test/plain' })
+    stubRequest(response)
+    await expect(provider({ allowCrossOriginRedirects: true }).fetch({ url: 'https://page.test/' }))
+      .rejects.toMatchObject({ code: 'WEB_REDIRECT_BLOCKED', message: 'HTTPS to HTTP redirect is not allowed' })
+    expect(cancelled()).toBe(true)
+  })
 
   it('cancels the body when a cross-origin redirect is blocked', async () => {
     const { response, cancelled } = fakeResponse({ status: 302, headers: {}, location: 'https://elsewhere.test/' })

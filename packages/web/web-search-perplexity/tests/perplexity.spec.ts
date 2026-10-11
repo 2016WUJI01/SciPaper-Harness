@@ -241,3 +241,35 @@ describe('web-search-perplexity plugin registration', () => {
     }
   })
 })
+
+
+describe('managed search credentials', () => {
+  it.each([undefined, async () => undefined, async () => ''])('rejects a missing resolved credential before HTTP', async (resolveApiKey) => {
+    const fetchMock = vi.fn<typeof fetch>()
+    vi.stubGlobal('fetch', fetchMock)
+    const provider = new PerplexitySearchProvider({ ...options, apiKey: '', ...resolveApiKey === undefined ? {} : { resolveApiKey } })
+    await expect(provider.search({ query: 'q' })).rejects.toMatchObject({ code: 'WEB_PROVIDER_CREDENTIAL_MISSING' })
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('resolves the configured managed reference on each search and handles a removed credential', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => jsonResponse({ choices: [] }))
+    vi.stubGlobal('fetch', fetchMock)
+    const resolve = vi.fn().mockResolvedValueOnce({ value: 'managed-test-key', source: 'test' }).mockResolvedValueOnce(undefined)
+    const ctx = new Context()
+    ctx.provide('credentials', { resolve })
+    const fibers: Awaited<ReturnType<typeof ctx.plugin>>[] = []
+    try {
+      fibers.push(await ctx.plugin(WebRuntime, { searchProvider: PERPLEXITY_PROVIDER_ID }))
+      fibers.push(await ctx.plugin(perplexityPlugin, { apiKey: '', apiKeyEnv: 'TEST_MANAGED_SEARCH_KEY', baseURL: options.baseURL }))
+      await ctx.web.search({ query: 'q' })
+      expect(resolve).toHaveBeenCalledWith('TEST_MANAGED_SEARCH_KEY')
+      expect(fetchMock.mock.calls[0]?.[0]).toEqual(expect.any(String))
+      expect(fetchMock.mock.calls[0]?.[1]?.headers).toMatchObject({ authorization: 'Bearer managed-test-key' })
+      await expect(ctx.web.search({ query: 'q' })).rejects.toMatchObject({ code: 'WEB_PROVIDER_CREDENTIAL_MISSING' })
+      expect(fetchMock).toHaveBeenCalledTimes(1)
+    } finally {
+      for (const fiber of fibers.reverse()) await fiber.dispose()
+    }
+  })
+})

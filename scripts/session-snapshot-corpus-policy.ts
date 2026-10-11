@@ -1,4 +1,4 @@
-/** Retained V3 replay inputs, current-writer fixtures, and bounded older migration coverage. */
+/** Retained V3-and-later replay inputs, current-writer fixtures, and bounded older migration coverage. */
 
 import { SESSION_FORMAT_VERSION } from '@deepseek-ai/dsh-session'
 import type { SnapshotSessionFormatManifest } from '@deepseek-ai/dsh-session-snapshot'
@@ -59,13 +59,15 @@ export function assertSnapshotCorpusPolicy(
       )
     }
     if (scenario.retained === undefined) {
-      if (selectedVersion === RETAINED_BASELINE_VERSION) {
+      if (Number.isSafeInteger(selectedVersion) && selectedVersion >= RETAINED_BASELINE_VERSION
+        && selectedVersion < SESSION_FORMAT_VERSION) {
         baselineRoles += scenario.selectedVersions.length
+        coverageByVersion.set(selectedVersion, new Set(REQUIRED_ADJACENT_COVERAGE))
       } else if (selectedVersion === SESSION_FORMAT_VERSION) {
         currentRoles += scenario.selectedVersions.length
       } else {
         throw new Error(
-          `${scenario.key}: selected Session generation v${selectedVersion} must be retained baseline v${RETAINED_BASELINE_VERSION} or current v${SESSION_FORMAT_VERSION}`,
+          `${scenario.key}: selected Session generation v${selectedVersion} must be retained baseline v${RETAINED_BASELINE_VERSION}..v${SESSION_FORMAT_VERSION - 1} or current v${SESSION_FORMAT_VERSION}`,
         )
       }
       continue
@@ -91,7 +93,6 @@ export function assertSnapshotCorpusPolicy(
     for (const item of scenario.retained.coverage) coverage.add(item)
   }
 
-  if (baselineRoles > 0) coverageByVersion.set(RETAINED_BASELINE_VERSION, new Set(REQUIRED_ADJACENT_COVERAGE))
   for (let version = 0; version < SESSION_FORMAT_VERSION; version += 1) {
     const required = version === 0 ? REQUIRED_V0_COVERAGE : REQUIRED_ADJACENT_COVERAGE
     const coverage = coverageByVersion.get(version)

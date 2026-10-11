@@ -49,6 +49,13 @@ describe('SSH filesystem provider', () => {
     expect(decodeURIComponent(new URL(url).pathname)).toBe(path)
   })
 
+  it('rejects a non-absolute remote identity instead of exposing a local file URL', async () => {
+    const { fs, dispatch } = await setup()
+    expect(() => fs.fileUrl({ targetKey: FsTargetKey('relative/file.txt'), displayPath: 'file.txt' }))
+      .toThrow('SSH target is not an absolute POSIX path')
+    expect(dispatch).not.toHaveBeenCalled()
+  })
+
   it('keeps remote canonical paths and sends relative spelling to the remote resolver', async () => {
     const { fs, dispatch } = await setup()
     dispatch.mockResolvedValue({ targetKey: '/remote/physical/file #?.txt', displayPath: 'link/../file #?.txt' })

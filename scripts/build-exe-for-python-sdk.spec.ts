@@ -100,10 +100,31 @@ describe('Python runtime executable builder CLI', () => {
 
     expect(result.status).toBe(0)
     expect(result.stdout).toContain('exec pkg')
-    expect(result.stdout).toContain('--sea --targets node24-macos-x64')
+    expect(result.stdout).toContain('--sea --compress GZip --targets node24-macos-x64')
     expect(result.stdout).toContain('prepare Python and Office skills for mac-x64')
     expect(result.stdout).toContain(join(root, 'dist-exe', 'macos-x64'))
   })
+
+  it.each([
+    'macos-arm64',
+    'macos-x64',
+    ...(process.platform === 'linux' ? [`linux-${process.arch}`] : []),
+    ...(process.platform === 'win32' ? ['win-x64'] : []),
+  ])(
+    'compresses the SEA archive before injecting the %s executable',
+    (target) => {
+      const result = run(
+        { npm_execpath: 'C:\\tools\\pnpm.cjs' },
+        '--skip-build',
+        '--dry-run',
+        `--targets=node24-${target}`,
+      )
+
+      expect(result.status).toBe(0)
+      const command = result.stdout.split('\n').find(line => line.includes(' exec pkg '))
+      expect(command).toContain(`--sea --compress GZip --targets node24-${target}`)
+    },
+  )
 
   it('rejects a Windows arm64 product before any build step', () => {
     const result = run(

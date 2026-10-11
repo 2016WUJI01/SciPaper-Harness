@@ -505,3 +505,19 @@ describe('moving the untouched draft', () => {
     expect(w.entry.getSnapshot().notice).toEqual({ kind: 'failed', action: 'reveal', reason: 'no file manager', sessionId: 's-draft' })
   })
 })
+
+it('shares a pending ordinary-conversation start and clears its opening state after listing', async () => {
+  const w = world({ sessions: listOf([session('project', '/research/a')], 'project') })
+  w.answers.push(() => ({ message: 'opened', sessionId: 'ordinary' }))
+  const first = w.flows.startOrdinary()
+  const second = w.flows.startOrdinary()
+  expect(second).toBe(first)
+  expect(w.entry.getSnapshot().pending).toBe(true)
+  await flush()
+  expect(w.command).toHaveBeenCalledExactlyOnceWith({ action: 'start-conversation', sessionId: 'project', ordinary: true })
+  w.listSessions([session('ordinary', '/home/conversations/one', { blank: true })])
+  await first
+  expect(w.openSession).toHaveBeenCalledExactlyOnceWith('ordinary')
+  expect(w.entry.getSnapshot()).toEqual({ notice: null })
+  w.lifetime.abort()
+})

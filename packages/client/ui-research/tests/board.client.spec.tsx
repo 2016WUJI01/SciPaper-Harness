@@ -563,3 +563,14 @@ describe('the board\'s line charts', () => {
     expect(long.getByRole('status').textContent).toBe('0long 0')
   })
 })
+
+it('pads single-digit hours and minutes on machine history axes', async () => {
+  const first = new Date(2026, 8, 24, 3, 4).getTime()
+  const board = snapshot({ machines: [{ key: 'early', environments: [], at: '', gpus: [],
+    history: [{ t: first, cpu: 0.2 }, { t: first + 60_000, cpu: 0.4 }],
+  }] })
+  const { props } = harness(fixture(), () => Promise.resolve(board))
+  const view = render(<Board {...props} />)
+  await flush()
+  expect(view.container.textContent).toContain(t('boardClock', { h: '03', min: '04' }))
+})

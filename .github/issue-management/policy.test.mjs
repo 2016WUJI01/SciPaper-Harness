@@ -3,9 +3,10 @@ import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSyn
 import { spawnSync } from 'node:child_process'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import test from 'node:test'
+import test, { beforeEach } from 'node:test'
 
-import { api, graphql, initializeIssueStartDate, issueSnapshot } from './github.mjs'
+import { api, graphql, initializeIssueStartDate, issueSnapshot, projectContext } from './github.mjs'
+import { repositoryName, usesConfiguredProject } from './repository.mjs'
 import { auditIssue, initializePullRequestStartDates, repairIssueLabels, runLifecycle } from './lifecycle.mjs'
 import {
   lifecyclePullRequestSnapshot,
@@ -23,6 +24,15 @@ import {
   validateIssue,
   validatePullRequest,
 } from './rules.mjs'
+
+beforeEach((t) => {
+  const previous = process.env.GITHUB_REPOSITORY
+  t.after(() => {
+    if (previous === undefined) delete process.env.GITHUB_REPOSITORY
+    else process.env.GITHUB_REPOSITORY = previous
+  })
+  process.env.GITHUB_REPOSITORY = 'deepseek-harness/deepseek-harness'
+})
 
 const projectGraphqlData = ({
   projectItem = true,
@@ -766,7 +776,7 @@ test('rejects multiple, unknown, legacy, and Issue-source PR labels', () => {
   )
 })
 
-const mockPolicyApi = (t, { pull = {}, requested = true, reviews = [], issues = {}, priority = 'P1', projectError = false } = {}) => {
+const mockPolicyApi = (t, { pull = {}, requested = true, reviews = [], issues = {}, priority = 'P1', projectError = false, repository = 'deepseek-harness/deepseek-harness' } = {}) => {
   const environment = ['GH_TOKEN', 'GITHUB_TOKEN', 'PROJECT_TOKEN', 'GITHUB_API_URL', 'GITHUB_OUTPUT']
   const previous = new Map(environment.map((key) => [key, process.env[key]]))
   const directory = mkdtempSync(join(tmpdir(), 'dsh-policy-'))
@@ -778,6 +788,7 @@ const mockPolicyApi = (t, { pull = {}, requested = true, reviews = [], issues = 
     rmSync(directory, { recursive: true, force: true })
   })
   for (const key of environment) delete process.env[key]
+  process.env.GITHUB_REPOSITORY = repository
   process.env.GITHUB_TOKEN = 'repository-token'
   process.env.GITHUB_OUTPUT = join(directory, 'output')
   const requests = []
@@ -786,6 +797,7 @@ const mockPolicyApi = (t, { pull = {}, requested = true, reviews = [], issues = 
   t.mock.method(globalThis, 'fetch', async (url, options) => {
     const path = new URL(url).pathname + new URL(url).search
     requests.push(path)
+    if (path !== '/graphql') assert.ok(path.startsWith(`/repos/${repository}/`), 'Wrong repository: ' + path)
     if (path.endsWith('/pulls/10')) return Response.json({
       draft: false, user: { type: 'User' }, body: 'Refs #2',
       labels: [{ name: 'kind/cleanup' }, { name: 'area/infra' }], ...pull,
@@ -891,7 +903,7 @@ test('performs no lifecycle requests for removed signals or title-only edits', a
   assert.deepEqual(fixture.requests, [])
 })
 
-test('keeps trusted preflight before token minting and required policy unconditional', () => {
+test('keeps upstream policy trusted and fork checks read-only before conditional token minting', () => {
   const source = readFileSync(new URL('../workflows/issue-policy.yml', import.meta.url), 'utf8')
   const job = source.slice(source.indexOf('  policy:'))
   assert.ok(job.includes('    name: Issue policy'))
@@ -899,7 +911,7 @@ test('keeps trusted preflight before token minting and required policy unconditi
   assert.ok(source.includes('types: [opened, edited, synchronize, reopened, labeled, unlabeled, ready_for_review, review_requested]'))
   const steps = job.split('      - name: ').slice(1)
   assert.equal(steps.length, 4)
-  assert.ok(steps[0].includes('ref: ${{ github.event.repository.default_branch }}'))
+  assert.ok(steps[0].includes("ref: ${{ github.repository == 'deepseek-harness/deepseek-harness' && github.event.repository.default_branch || github.sha }}"))
   assert.ok(steps[0].includes('persist-credentials: false'))
   assert.doesNotMatch(source, /pull_request\.head|pull_request_target/)
   assert.ok(steps[1].includes('id: preflight'))
@@ -907,7 +919,7 @@ test('keeps trusted preflight before token minting and required policy unconditi
   assert.ok(steps[1].includes('node .github/issue-management/policy.mjs pr-preflight'))
   assert.ok(steps[1].includes('if [ -f .github/issue-management/selective-preflight.json ]; then'))
   assert.doesNotMatch(steps[1], /secrets\.|PROJECT_TOKEN|if:/)
-  assert.ok(steps[2].includes("if: ${{ steps.preflight.outputs.needs-project == 'true' }}"))
+  assert.ok(steps[2].includes("if: ${{ github.repository == 'deepseek-harness/deepseek-harness' && steps.preflight.outputs.needs-project == 'true' }}"))
   assert.ok(steps[2].includes('permission-organization-projects: read'))
   assert.ok(steps[3].includes('PROJECT_TOKEN: ${{ steps.app-token.outputs.token }}'))
   assert.ok(steps[3].includes('run: node .github/issue-management/policy.mjs pr'))
@@ -966,6 +978,7 @@ test('allocates lifecycle runners only for relevant reviews and PR body edits', 
   const job = source.slice(source.indexOf('  lifecycle:'))
   const beforeSteps = job.slice(0, job.indexOf('    steps:'))
   assert.ok(beforeSteps.includes('    if: >-'))
+  assert.ok(beforeSteps.includes("github.repository == 'deepseek-harness/deepseek-harness' &&"))
   assert.ok(beforeSteps.includes("(github.event_name != 'pull_request_review' || github.event.review.state == 'changes_requested') &&"))
   assert.ok(beforeSteps.includes("(github.event_name != 'pull_request' || github.event.action != 'edited' || github.event.changes.body != null)"))
   assert.ok(source.includes('ref: ${{ github.event.repository.default_branch }}'))
@@ -1074,4 +1087,86 @@ test('allows missing Priority only when resolving Issues are also unprioritized'
       '有 Priority 的解决型 PR 要求每个被解决 Issue 都设置 Priority',
     ),
   )
+})
+
+test('resolves the Actions repository independently from the configured Project repository', () => {
+  delete process.env.GITHUB_REPOSITORY
+  assert.equal(repositoryName(), 'deepseek-harness/deepseek-harness')
+  assert.equal(usesConfiguredProject(), true)
+  process.env.GITHUB_REPOSITORY = 'DeepSeek-Harness/DeepSeek-Harness'
+  assert.equal(usesConfiguredProject(), true)
+  process.env.GITHUB_REPOSITORY = 'M-24rjgc/SciPaper-Harness'
+  assert.equal(repositoryName(), 'M-24rjgc/SciPaper-Harness')
+  assert.equal(usesConfiguredProject(), false)
+  for (const invalid of ['', 'owner', 'owner/repo/extra', 'owner/repo?query']) {
+    process.env.GITHUB_REPOSITORY = invalid
+    assert.throws(repositoryName, /GITHUB_REPOSITORY must identify/)
+  }
+})
+
+test('reads the fork PR before applying the draft exemption without upstream requests', async (t) => {
+  const fixture = mockPolicyApi(t, {
+    repository: 'M-24rjgc/SciPaper-Harness',
+    pull: { draft: true, body: 'Fixes #999' },
+  })
+  const event = { pull_request: { number: 10, draft: false } }
+  assert.deepEqual(await runPullRequestPreflight(event), { eligible: false, needsProject: false })
+  await runPullRequestCheck(event)
+  assert.deepEqual(fixture.requests, [
+    '/repos/M-24rjgc/SciPaper-Harness/pulls/10',
+    '/repos/M-24rjgc/SciPaper-Harness/pulls/10',
+  ])
+})
+
+test('enforces fork Issue references and PR metadata without the upstream Project', async (t) => {
+  const fixture = mockPolicyApi(t, {
+    repository: 'M-24rjgc/SciPaper-Harness',
+    pull: {
+      body: 'Fixes M-24rjgc/SciPaper-Harness#2; Refs #4; Fixes deepseek-harness/deepseek-harness#999',
+      labels: [{ name: 'kind/cleanup' }, { name: 'area/infra' }, { name: 'p1' }],
+    },
+    issues: { 2: {}, 4: {} },
+    projectError: true,
+  })
+  const event = { pull_request: { number: 10 } }
+  assert.deepEqual(await runPullRequestPreflight(event), { eligible: true, needsProject: false })
+  await runPullRequestCheck(event)
+  assert.equal(fixture.requests.length, 10)
+  assert.ok(fixture.requests.every((path) => path.startsWith('/repos/M-24rjgc/SciPaper-Harness/')))
+  assert.equal(fixture.workflowOutput(), 'eligible=true\nexempt=false\nneeds-project=false\n')
+})
+
+for (const [name, pull, issues, error] of [
+  ['missing labels', { labels: [] }, { 2: {} }, /PR 必须至少有一个 area/],
+  ['multiple priorities', { labels: [{ name: 'kind/cleanup' }, { name: 'area/infra' }, { name: 'p0' }, { name: 'p1' }] }, { 2: {} }, /PR 最多有一个 p0–p3/],
+  ['upstream-only reference', { body: 'Fixes deepseek-harness/deepseek-harness#2' }, {}, /PR 正文必须引用至少一个同仓库 Issue/],
+  ['PR number reference', { body: 'Fixes #2' }, { 2: { pull_request: {} } }, /PR 编号（包括堆叠依赖 PR）不算 Issue 引用/],
+]) {
+  test('rejects fork ' + name + ' without Project credentials', async (t) => {
+    const fixture = mockPolicyApi(t, { repository: 'M-24rjgc/SciPaper-Harness', pull, issues })
+    await assert.rejects(runPullRequestCheck({ pull_request: { number: 10 } }), /Issue policy 未通过/)
+    assert.match(fixture.output.join(''), error)
+    assert.ok(!fixture.requests.includes('/graphql'))
+  })
+}
+
+test('fails fork checks when a same-repository Issue read fails', async (t) => {
+  const fixture = mockPolicyApi(t, {
+    repository: 'M-24rjgc/SciPaper-Harness',
+    pull: { body: 'Fixes #2' },
+    issues: { 2: null },
+  })
+  await assert.rejects(runPullRequestCheck({ pull_request: { number: 10 } }), /404/)
+  assert.equal(fixture.requests.length, 4)
+})
+
+test('performs no lifecycle writes or Project reads outside the configured repository', async (t) => {
+  const fixture = mockPolicyApi(t, { repository: 'M-24rjgc/SciPaper-Harness' })
+  await runLifecycle('issues', { action: 'opened', issue: { number: 2 } })
+  await runLifecycle('pull_request', { action: 'opened', pull_request: { number: 10 } })
+  await runLifecycle('pull_request_review', {
+    action: 'submitted', review: { state: 'changes_requested' }, pull_request: { number: 10 },
+  })
+  await assert.rejects(projectContext(2), /No Issue Project configured for M-24rjgc\/SciPaper-Harness/)
+  assert.deepEqual(fixture.requests, [])
 })

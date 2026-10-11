@@ -29,9 +29,11 @@
     // under its own tsconfig boundary.
     "paths": {
       "@deepseek-ai/dsh-research-app/migration": ["./packages/bundle/research-app/src/migration.ts"],
+      "@deepseek-ai/dsh-research-app/knowledge-migration": ["./packages/bundle/research-app/src/knowledge-migration.ts"],
       "@deepseek-ai/dsh-client-ui-research": ["./packages/client/ui-research/src/index.ts"],
       "@deepseek-ai/dsh-client-ui-research/client": ["./packages/client/ui-research/src/client/index.ts"],
       "@deepseek-ai/dsh-research-workbench": ["./packages/research/workbench/src/index.ts"],
+      "@deepseek-ai/dsh-research-workbench/board-values": ["./packages/research/workbench/src/board-values.ts"],
       "@deepseek-ai/dsh-research-workbench/types": ["./packages/research/workbench/src/types.ts"],
       "@deepseek-ai/dsh-research-workbench/tools": ["./packages/research/workbench/src/agent-tools.ts"],
       "@deepseek-ai/dsh-research-workbench/mode-skills": ["./packages/research/workbench/src/mode-skills.ts"],

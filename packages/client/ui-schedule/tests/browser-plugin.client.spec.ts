@@ -381,6 +381,10 @@ describe('ui-schedule browser half', () => {
       state.attachmentIds.push('existing-attachment' as never)
       expect(panel.onNewTask()).toBe(true)
       expect(input.setDraft).not.toHaveBeenCalled()
+      vi.spyOn(ctx.sessions, 'scope').mockReturnValueOnce(undefined)
+      expect(panel.onNewTask()).toBe(true)
+      expect(openSession).toHaveBeenLastCalledWith(current)
+      expect(input.setDraft).not.toHaveBeenCalled()
     } finally {
       await fiber.dispose()
       owner()
