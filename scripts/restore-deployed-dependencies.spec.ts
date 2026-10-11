@@ -157,3 +157,31 @@ it('does not borrow undeployed dependencies from unrelated ancestor node_modules
   write(join(dirname(deployment), 'node_modules/unrelated'), {})
   await expect(restoreDeployedDependencies(deployment, source)).rejects.toThrow('required dependency unrelated is missing')
 })
+
+for (const missing of [false, true]) it(`keeps the canonical deployment boundary through a directory alias (missing=${missing})`, async (test) => {
+  const { source, deployment } = fixture(test)
+  const alias = join(dirname(deployment), 'deployment-alias')
+  write(source, { dependencies: { cli: '*', cordis: '*' } })
+  write(deployment, {})
+  write(join(source, 'node_modules/cli'), { dependencies: { acp: '*', cordis: '*' } })
+  write(join(source, 'node_modules/cordis'), {})
+  write(join(deployment, 'node_modules/acp'), { dependencies: missing ? { unrelated: '*' } : { cordis: '*' } })
+  write(join(dirname(deployment), 'node_modules/unrelated'), {})
+  symlinkSync(deployment, alias, 'junction')
+  if (missing) await expect(restoreDeployedDependencies(alias, source)).rejects.toThrow('required dependency unrelated is missing')
+  else {
+    expect(await restoreDeployedDependencies(alias, source)).toEqual(['cli', 'cordis'])
+    expect(await restoreDeployedDependencies(alias, source)).toEqual([])
+    expect(() => lstatSync(join(deployment, 'node_modules/acp/node_modules/cordis'))).toThrow()
+  }
+})
+
+it('rejects an unversioned conflicting source without replacing the installed package', async (test) => {
+  const { source, deployment } = fixture(test)
+  write(source, { dependencies: { cli: '*' } })
+  write(deployment, {})
+  write(join(source, 'node_modules/cli'), { version: undefined })
+  write(join(deployment, 'node_modules/cli'), {})
+  await expect(restoreDeployedDependencies(deployment, source)).rejects.toThrow('conflicts with installed source version (missing)')
+  expect(JSON.parse(readFileSync(join(deployment, 'node_modules/cli/package.json'), 'utf8'))).toHaveProperty('version', '1.0.0')
+})

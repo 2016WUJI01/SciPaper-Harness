@@ -44,6 +44,10 @@ async function copyPackage(source: string, destination: string): Promise<void> {
  * @throws if a required dependency is absent from both installed trees.
  */
 export async function restoreDeployedDependencies(deployment: string, source: string): Promise<string[]> {
+  // Compare canonical roots: Windows temporary paths can arrive as 8.3 aliases.
+  // Mixing those aliases with realpath results breaks the deployment boundary.
+  deployment = await realpath(deployment)
+  source = await realpath(source)
   const queue = [{ destination: deployment, source }]
   const visited = new Set<string>()
   const origins = new Map<string, string>()

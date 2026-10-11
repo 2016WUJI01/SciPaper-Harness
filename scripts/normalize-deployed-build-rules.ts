@@ -1,7 +1,7 @@
 /** Preserve workspace lifecycle permissions after pnpm converts local dependencies to file URLs. */
 import { readFile, realpath, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
-import { pathToFileURL } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { dump, load } from 'js-yaml'
 
 interface WorkspaceManifest {
@@ -22,18 +22,22 @@ export async function normalizeDeployedBuildRules(deployment: string, workspace:
   await readFile(join(deployment, 'pnpm-lock.yaml'), 'utf8')
   const path = join(deployment, 'pnpm-workspace.yaml')
   const manifest = load(await readFile(path, 'utf8')) as WorkspaceManifest
-  const rules = new Map(Object.entries(manifest.allowBuilds ?? {}))
+  const rules = new Map<string, boolean | string>()
   for (const [key, value] of Object.entries(manifest.allowBuilds ?? {})) {
-    const match = /^(.*@)file:(?!\/\/)(.+)$/.exec(key)
+    const match = /^(.*@)(file:.+)$/.exec(key)
     const name = match?.[1]
-    const localPath = match?.[2]
-    if (name === undefined || localPath === undefined) continue
-    const normalized = name + pathToFileURL(await realpath(resolve(workspace, localPath))).href
+    const location = match?.[2]
+    let normalized = key
+    if (name !== undefined && location !== undefined) {
+      // Absolute file URLs can also name an 8.3 alias or junction. Normalize
+      // both forms before comparing permissions, never just the relative rule.
+      const localPath = location.startsWith('file://') ? fileURLToPath(location) : resolve(workspace, location.slice(5))
+      normalized = name + pathToFileURL(await realpath(localPath)).href
+    }
     if (rules.has(normalized) && rules.get(normalized) !== value) {
       throw new Error(`deploy: conflicting build permissions for ${normalized}`)
     }
     rules.set(normalized, value)
-    rules.delete(key)
   }
   manifest.allowBuilds = Object.fromEntries(rules)
   await writeFile(path, dump(manifest))

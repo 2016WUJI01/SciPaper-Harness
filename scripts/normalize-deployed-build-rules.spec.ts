@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -27,7 +27,7 @@ for (const permission of [true, false]) it(`preserves local-file permission ${pe
   })
   await normalizeDeployedBuildRules(deployment, workspace)
   expect(load(readFileSync(path, 'utf8'))).toEqual({
-    allowBuilds: { [`@scope/helper@${pathToFileURL(local).href}`]: permission, koffi: true, protobufjs: false },
+    allowBuilds: { [`@scope/helper@${pathToFileURL(realpathSync(local)).href}`]: permission, koffi: true, protobufjs: false },
     patchedDependencies: { native: '../native.patch' },
   })
   const first = readFileSync(path, 'utf8')
@@ -39,7 +39,7 @@ it('rejects conflicting permissions without rewriting the staged policy', async 
   const { workspace, deployment, local, path } = fixture(test, {})
   const original = dump({ allowBuilds: {
     '@scope/helper@file:packages/local # helper': true,
-    [`@scope/helper@${pathToFileURL(local).href}`]: false,
+    [`@scope/helper@${pathToFileURL(realpathSync(local)).href}`]: false,
   } })
   writeFileSync(path, original)
   await expect(normalizeDeployedBuildRules(deployment, workspace)).rejects.toThrow('conflicting build permissions')
@@ -52,4 +52,29 @@ it('rejects an unlocked deployment before modifying lifecycle permissions', asyn
   const original = readFileSync(path, 'utf8')
   await expect(normalizeDeployedBuildRules(deployment, workspace)).rejects.toThrow('pnpm-lock.yaml')
   expect(readFileSync(path, 'utf8')).toBe(original)
+})
+
+for (const conflict of [false, true]) it(`canonicalizes absolute junction aliases before comparing build permissions (conflict=${conflict})`, async (test) => {
+  const { workspace, deployment, local, path } = fixture(test, {})
+  const alias = join(workspace, 'alias')
+  symlinkSync(local, alias, 'junction')
+  const original = dump({ allowBuilds: {
+    [`@scope/helper@${pathToFileURL(alias).href}`]: false,
+    '@scope/helper@file:packages/local # helper': conflict,
+  } })
+  writeFileSync(path, original)
+  if (conflict) {
+    await expect(normalizeDeployedBuildRules(deployment, workspace)).rejects.toThrow('conflicting build permissions')
+    expect(readFileSync(path, 'utf8')).toBe(original)
+  } else {
+    await normalizeDeployedBuildRules(deployment, workspace)
+    expect(load(readFileSync(path, 'utf8'))).toEqual({ allowBuilds: { [`@scope/helper@${pathToFileURL(realpathSync(local)).href}`]: false } })
+  }
+})
+
+it('retains an empty permission policy when no allowBuilds section exists', async (test) => {
+  const { workspace, deployment, path } = fixture(test, {})
+  writeFileSync(path, 'packages: []\n')
+  await normalizeDeployedBuildRules(deployment, workspace)
+  expect(load(readFileSync(path, 'utf8'))).toEqual({ packages: [], allowBuilds: {} })
 })
