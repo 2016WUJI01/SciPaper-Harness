@@ -504,7 +504,13 @@ class SingleExeBuild {
           + `target ${target.platform}-${target.arch} does not match host ${host.platform}-${host.arch}.`,
         )
       }
-      resolveWindowsNodePtyAddons(join(this.staging, 'node_modules', 'node-pty'), target.arch)
+      const stagedPackage = join(this.staging, 'node_modules', 'node-pty')
+      if (this.cli.dryRun) {
+        // Dry-run deployment does not create the staged dependency tree.
+        console.log(`build-exe-for-python-sdk: [dry-run] verify Windows node-pty addons in ${stagedPackage}`)
+      } else {
+        resolveWindowsNodePtyAddons(stagedPackage, target.arch)
+      }
       return
     }
     if (target.platform !== 'linux') return

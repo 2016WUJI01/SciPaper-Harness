@@ -1,6 +1,6 @@
 import { lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { expect, it, type TestContext } from 'vitest'
 import { restoreDeployedDependencies } from './restore-deployed-dependencies.ts'
 
@@ -97,4 +97,63 @@ it('keeps distinct installed sources with the same version and different closure
   expect(JSON.parse(readFileSync(join(deployment, 'node_modules/parser/package.json'), 'utf8'))).toHaveProperty('version', '1.0.0')
   expect(JSON.parse(readFileSync(join(deployment, 'node_modules/second/node_modules/library/node_modules/parser/package.json'), 'utf8'))).toHaveProperty('version', '2.0.0')
   expect(await restoreDeployedDependencies(deployment, source)).toEqual([])
+})
+
+it('traverses deployed dependencies of a workspace package injected into the source tree', async (test) => {
+  const { source, deployment } = fixture(test)
+  write(source, { dependencies: { cli: '*', cordis: '*' } })
+  write(deployment, {})
+  // Legacy hoisted deploy can replace the CLI workspace link with copied files,
+  // while injecting its transitive packages only into the deployment tree.
+  write(join(source, 'node_modules/cli'), { dependencies: { acp: '*', research: '*', cordis: '*' } })
+  write(join(source, 'node_modules/cordis'), {})
+  write(join(deployment, 'node_modules/acp'), { peerDependencies: { cordis: '*' } })
+  write(join(deployment, 'node_modules/research'), { dependencies: { knowledge: '*' } })
+  write(join(deployment, 'node_modules/knowledge'), { peerDependencies: { cordis: '*' } })
+
+  expect(await restoreDeployedDependencies(deployment, source)).toEqual(['cli', 'cordis'])
+  expect(await restoreDeployedDependencies(deployment, source)).toEqual([])
+  expect(lstatSync(join(deployment, 'node_modules/cli')).isSymbolicLink()).toBe(false)
+  expect(() => lstatSync(join(deployment, 'node_modules/acp/node_modules/cordis'))).toThrow()
+  expect(() => lstatSync(join(deployment, 'node_modules/knowledge/node_modules/cordis'))).toThrow()
+})
+
+it('rejects a missing required edge further down a deployed injected graph', async (test) => {
+  const { source, deployment } = fixture(test)
+  write(source, { dependencies: { cli: '*' } })
+  write(deployment, {})
+  write(join(source, 'node_modules/cli'), { dependencies: { acp: '*' } })
+  write(join(deployment, 'node_modules/acp'), { dependencies: { missing: '*' } })
+  await expect(restoreDeployedDependencies(deployment, source)).rejects.toThrow('required dependency missing is missing')
+})
+
+it('resolves original workspace links before reusing injected deployed packages', async (test) => {
+  const { source, deployment } = fixture(test)
+  const workspace = join(dirname(source), 'workspace')
+  write(source, { dependencies: { cli: '*', cordis: '*' } })
+  write(deployment, {})
+  write(join(source, 'node_modules/cordis'), {})
+  write(join(workspace, 'cli'), { dependencies: { acp: '*', cordis: '*' } })
+  write(join(workspace, 'acp'), { peerDependencies: { cordis: '*' } })
+  for (const name of ['cli', 'acp']) {
+    mkdirSync(join(workspace, name, 'node_modules'))
+    symlinkSync(join(source, 'node_modules/cordis'), join(workspace, name, 'node_modules/cordis'), 'junction')
+  }
+  symlinkSync(join(workspace, 'cli'), join(source, 'node_modules/cli'), 'junction')
+  symlinkSync(join(workspace, 'acp'), join(workspace, 'cli/node_modules/acp'), 'junction')
+  write(join(deployment, 'node_modules/acp'), { peerDependencies: { cordis: '*' } })
+
+  expect(await restoreDeployedDependencies(deployment, source)).toEqual(['cli', 'cordis'])
+  expect(await restoreDeployedDependencies(deployment, source)).toEqual([])
+  expect(() => lstatSync(join(deployment, 'node_modules/acp/node_modules/cordis'))).toThrow()
+})
+
+it('does not borrow undeployed dependencies from unrelated ancestor node_modules', async (test) => {
+  const { source, deployment } = fixture(test)
+  write(source, { dependencies: { cli: '*' } })
+  write(deployment, {})
+  write(join(source, 'node_modules/cli'), { dependencies: { acp: '*' } })
+  write(join(deployment, 'node_modules/acp'), { dependencies: { unrelated: '*' } })
+  write(join(dirname(deployment), 'node_modules/unrelated'), {})
+  await expect(restoreDeployedDependencies(deployment, source)).rejects.toThrow('required dependency unrelated is missing')
 })

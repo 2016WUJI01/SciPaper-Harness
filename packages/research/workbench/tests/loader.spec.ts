@@ -352,7 +352,7 @@ async function boot(pool: MemoryMediaPool, options: BootOptions = {}): Promise<H
           applied.set(session.id, name)
         },
       } as unknown as Context['permissionPresets'])
-      c.provide('sessionController', {
+      const sessionController = {
         create: async (request: SessionCreateRequest) => {
           const { workspaceId, agentPreset, sessionId } = request
           const cwd = workspaceId?.slice('workspace:'.length) ?? request.cwd ?? root!
@@ -384,29 +384,33 @@ async function boot(pool: MemoryMediaPool, options: BootOptions = {}): Promise<H
         inspect: async (id: string) => {
           const session = attachedExamples.get(id)
           if (session === undefined) throw new Error(`No fixture Session: ${id}`)
-          return { meta: session.header, events: exampleEvents(session) }
+          return { meta: session.header, inheritedEventCount: session.inheritedEventCount, events: exampleEvents(session) }
         },
-        fork: async (request: { workspaceId?: WorkspaceId }) => {
+        fork: async (request) => {
           const id = `session-${sessions.length + 1}`
           sessions.push(id)
           open({ id, header: { cwd: request.workspaceId?.slice('workspace:'.length) ?? root! } })
           turns.add(id)
           return { sessionId: SessionId(id) }
         },
-        selectModel: async () => {},
-        prompt: async (request: unknown) => { prompts.push(request) },
+        selectModel: async ({ provider, model, reasoningEffort }) => ({
+          selected: { provider, model, ...reasoningEffort === undefined ? {} : { reasoningEffort } },
+        }),
+        prompt: async (request) => { prompts.push(request); return { accepted: true } },
         list: async () => {
           if (listing.failure) throw listing.failure
           return {
             items: live.map(session => ({
-              sessionId: session.id, updatedAt: 0, running: session.running ?? false, blank: !turns.has(session.id),
+              sessionId: SessionId(session.id), agentAvailable: agents.some(agent => agent.id === session.id),
+              updatedAt: 0, running: session.running ?? false, blank: !turns.has(session.id),
               ...(session.header.cwd === undefined ? {} : { cwd: session.header.cwd }),
               ...(session.header.origin === undefined ? {} : { origin: session.header.origin }),
               ...(session.header.execution === undefined ? {} : { execution: session.header.execution }),
             })),
           }
         },
-      } as unknown as Context['sessionController'])
+      } satisfies Pick<Context['sessionController'], 'create' | 'inspect' | 'fork' | 'selectModel' | 'prompt' | 'list'>
+      c.provide('sessionController', sessionController)
       c.provide('credentials', {
         set: async (ref: string, value: string) => { credentials.set(ref, value) },
         resolve: async (ref: string) => credentials.has(ref) ? { value: credentials.get(ref) } : undefined,
@@ -3125,7 +3129,8 @@ describe('conversation membership and project creation through the Loader', () =
     await service.execute({ action: 'environment', projectId: project.id, environment: { name: 'gpu', kind: 'existing', target: 'ssh',
       python: '/usr/bin/python3', sshHost: 'gpu', remoteRoot: '/work/project', requirements: [], isDefault: true } }, signal, 'agent')
     const execution = { kind: 'ssh' as const, host: 'gpu' }
-    for (const [id, cwd] of [['remote', '/work/project/code'], ['foreign', project.root]] as const) {
+    // SSH coordinates stay POSIX on every host; a sibling with the same prefix is outside this research.
+    for (const [id, cwd] of [['remote', '/work/project/code'], ['foreign', '/work/project-other/code']] as const) {
       open({ id, header: { cwd, execution } })
       const owner = liveAgent(id, cwd, execution); agents.push(owner)
       goals.set(id, { id: `goal-${id}` as GoalView['id'], revision: 1, objective: id, phase: 'active', maxGoalRounds: 10,

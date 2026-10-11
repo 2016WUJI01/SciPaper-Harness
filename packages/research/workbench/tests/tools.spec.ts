@@ -11,6 +11,7 @@ import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
 import type { PreToolDecision, ToolExecution } from '@deepseek-ai/dsh-tools'
 import { attachedFilesDirectory } from '../src/files.ts'
+import * as researchFiles from '../src/files.ts'
 import { projectBrief, registerResearchTools } from '../src/tools.ts'
 import { RELATION_GROUNDING_RULE } from '../src/knowledge-relations-grounding.ts'
 import { newProject } from '../src/project.ts'
@@ -228,6 +229,27 @@ describe('research tools find the project from the working directory', () => {
       await expect(h.call('research_evidence', { action: 'import', paths: [7] }, '/srv/study', execution)).rejects.toThrow()
       expect(h.executed.map(item => item.request.action)).toEqual(['import', 'import-template', 'novelty'])
     } finally { vi.unstubAllEnvs(); await rm(home, { recursive: true }) }
+  })
+
+  it('checks absolute POSIX imports against the host attachment store in an SSH conversation', async () => {
+    const h = harness()
+    h.project.environments.push({
+      id: 'remote' as ResearchProject['environments'][number]['id'], name: 'Remote', kind: 'existing', target: 'ssh',
+      python: '/usr/bin/python3', sshHost: 'alpha', remoteRoot: '/srv/study', requirements: [],
+      fingerprint: 'test', status: 'ready', details: '', isDefault: false,
+    })
+    const execution = { kind: 'ssh' as const, host: 'alpha' }
+    // Remote paths stay POSIX even when this test runs on a Windows host.
+    const attached = '/host/attachments/paper.tex', remote = '/srv/study/private.tex'
+    const attachment = vi.spyOn(researchFiles, 'isAttachment').mockImplementation(async path => path === attached)
+    try {
+      await h.call('research_evidence', { action: 'import', paths: [attached] }, '/srv/study', execution)
+      await h.call('research_artifact', { action: 'import-template', paths: [attached] }, '/srv/study', execution)
+      await expect(h.call('research_artifact', { action: 'import-template', paths: [remote] }, '/srv/study', execution))
+        .rejects.toThrow(/project-relative paths/)
+      expect(attachment.mock.calls.map(([path]) => path)).toEqual([attached, attached, remote])
+      expect(h.executed.map(item => item.request.action)).toEqual(['import', 'import-template'])
+    } finally { attachment.mockRestore() }
   })
 
   it('registers no tools for an empty module selection and gives disabled-graph guidance', async () => {

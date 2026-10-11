@@ -267,6 +267,8 @@ describe('TeX distribution selection', () => {
   })
 
   it('initializes managed formats once in writable engine-specific directories and retries a failed initialization', async () => {
+    vi.stubEnv('SystemRoot', undefined)
+    vi.stubEnv('LOCALAPPDATA', undefined)
     const root = await temporary()
     const bin = join(root, 'latex', 'TinyTeX', 'bin', 'windows')
     vi.stubEnv('DSH_HOME', join(root, 'data-home'))
@@ -285,6 +287,9 @@ describe('TeX distribution selection', () => {
     const runtime = await manager.latexRuntime(signal, 'xelatex')
     expect(runtime.env.TEXMFVAR).toBe(join(cache, 'texmf-var'))
     expect(runtime.env.TEXMFCACHE).toBe(cache)
+    const fonts = await readFile(runtime.env.FONTCONFIG_FILE!, 'utf8')
+    expect(fonts).toContain('<dir>C:/Windows/Fonts</dir>')
+    expect(fonts).not.toContain('Microsoft/Windows/Fonts')
     expect(runtime.compilerArgs).toEqual([])
     await manager.latexRuntime(signal, 'xelatex')
     const formats = scripted.calls.filter(call => call.args.includes('--byfmt'))

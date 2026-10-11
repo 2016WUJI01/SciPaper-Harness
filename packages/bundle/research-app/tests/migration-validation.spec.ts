@@ -242,7 +242,7 @@ it('anchors custom preset imports, converts both provider protocols and preserve
   const source = `${stringify(plugins)}- name: cordis:include\n  config: {path: !!js "new URL('./dynamic.yml', baseUrl).href"}\n`
   const directory = await customPreset(fixture.home, 'custom', source)
   await migrateResearchProfile(fixture)
-  const content = parseDocument(await readFile(fixture.patchPath, 'utf8'), { customTags: [{ tag: 'tag:yaml.org,2002:js', resolve: (value: string) => value }] }).toJS() as unknown
+  const content: unknown = parseDocument(await readFile(fixture.patchPath, 'utf8'), { customTags: [{ tag: 'tag:yaml.org,2002:js', resolve: (value: string) => value }] }).toJS()
   const converted = property(content, 0, 'insert', 0, 'config', 'plugins')
   expect(property(converted, 0, 'name')).toBe('@deepseek-ai/dsh-llm-deepseek-api-key')
   expect(property(converted, 1, 'name')).toBe('@deepseek-ai/dsh-llm-pi-ai')

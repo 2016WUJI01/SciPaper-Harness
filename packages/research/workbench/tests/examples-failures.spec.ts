@@ -7,8 +7,8 @@ import { initializeResearchExamples, type ExampleRegistration, type ResearchExam
 import type { ResearchProject } from '../src/types.ts'
 import type { WorkspaceId } from '@deepseek-ai/dsh-workspace'
 
-const faults = vi.hoisted(() => ({
-  operation: '', error: undefined as unknown, race: false,
+const faults = vi.hoisted((): { operation: string; error: unknown; race: boolean } => ({
+  operation: '', error: undefined, race: false,
 }))
 vi.mock('node:fs/promises', async (original) => {
   const actual = await original<typeof import('node:fs/promises')>()

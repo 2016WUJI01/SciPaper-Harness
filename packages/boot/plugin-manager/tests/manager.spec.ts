@@ -12,7 +12,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import { afterAll, beforeAll, expect, it, onTestFinished, vi } from 'vitest'
 import {
   boot, composeEntries, initProfile, loadProfileDirectory, readProfilePatches, readProfileManifest,
-  reconcileProfilePatches, OPTIONAL_BUNDLES, PluginPackages, readPluginMeta, getDshRuntimeVersion,
+  reconcileProfilePatches, resolveBundleDir, OPTIONAL_BUNDLES, PluginPackages, readPluginMeta, getDshRuntimeVersion,
   type ProfileContext, type RuntimeResolution,
 } from '@deepseek-ai/dsh-app-boot'
 import PluginManager, { type Config, type PluginChange, type PluginInstallLogChunk, type PluginInstallProgress, type PluginInstallRequestId } from '../src/index.ts'
@@ -40,12 +40,13 @@ async function fixture(reload: 'live' | 'startup' = 'live', overlay = false, pre
   const anchor = join(home, 'package.json')
   writeFileSync(anchor, '{"name":"installation","dependencies":{}}\n')
   initProfile(dir, ['core', 'extra'])
-  const bundle = (name: string, rows: unknown[]) => {
-    const path = join(dir, 'node_modules', name)
+  const bundle = (name: string, rows: unknown[], location: 'profile' | 'installation' = 'profile') => {
+    const path = join(location === 'installation' ? home : dir, 'node_modules', name)
     mkdirSync(path, { recursive: true })
     writeFileSync(join(path, 'package.json'), JSON.stringify({ name, version: '1.0.0', dsh: { bundle: { patch: './cordis.patch.yml' } } }))
     writeFileSync(join(path, 'cordis.patch.yml'), JSON.stringify([{ insert: rows }]))
     writeFileSync(join(path, 'plugin.mjs'), 'export function apply(ctx, config) { if (config?.fail) throw new Error("test activation failed"); ctx.provide(config?.service ?? "managedProbe", true) }\n')
+    return path
   }
   bundle('core', [{ id: 'manager', name: 'cordis:manager', config }])
   bundle('extra', [{ id: 'managed', name: './plugin.mjs' }])
@@ -444,19 +445,34 @@ it('retains installed dependencies when toggling a bundle and appends it when re
 })
 
 it('selecting a search backend replaces the other optional search backend', async () => {
-  const { manager, dir, bundle } = await fixture()
+  const { ctx, manager, dir, bundle, profile } = await fixture()
   const exa = '@deepseek-ai/dsh-web-search-exa-bundle'
   const perplexity = '@deepseek-ai/dsh-web-search-perplexity-bundle'
-  bundle(exa, [{ id: 'exa-search', name: './plugin.mjs', config: { service: 'exaSearchProbe' } }])
-  bundle(perplexity, [{ id: 'perplexity-search', name: './plugin.mjs', config: { service: 'perplexitySearchProbe' } }])
-  expect(await manager.setBundleEnabled(exa, true)).toMatchObject({ application: 'applied' })
+  // Installation lookup precedes profile lookup, including pnpm's ambient NODE_PATH packages.
+  const exaPath = bundle(exa, [{ id: 'exa-search', name: './plugin.mjs', config: { service: 'exaSearchProbe' } }], 'installation')
+  const perplexityPath = bundle(perplexity, [{ id: 'perplexity-search', name: './plugin.mjs', config: { service: 'perplexitySearchProbe' } }], 'installation')
+  expect(resolveBundleDir('test', exa, profile.installAnchor, dir)).toBe(exaPath)
+  expect(resolveBundleDir('test', perplexity, profile.installAnchor, dir)).toBe(perplexityPath)
+  const exaChange = await manager.setBundleEnabled(exa, true)
+  expect(exaChange.error).toBeUndefined()
+  expect(exaChange).toMatchObject({ application: 'applied' })
   expect(readProfileManifest('test', dir).dsh?.profile?.bundles).toContain(exa)
-  expect(await manager.setBundleEnabled(perplexity, true)).toMatchObject({ application: 'applied' })
+  expect(ctx.get('exaSearchProbe')).toBe(true)
+  expect(ctx.get('perplexitySearchProbe')).toBeUndefined()
+  const perplexityChange = await manager.setBundleEnabled(perplexity, true)
+  expect(perplexityChange.error).toBeUndefined()
+  expect(perplexityChange).toMatchObject({ application: 'applied' })
   expect(readProfileManifest('test', dir).dsh?.profile?.bundles).toContain(perplexity)
   expect(readProfileManifest('test', dir).dsh?.profile?.bundles).not.toContain(exa)
-  expect(await manager.setBundleEnabled(exa, true)).toMatchObject({ application: 'applied' })
+  expect(ctx.get('exaSearchProbe')).toBeUndefined()
+  expect(ctx.get('perplexitySearchProbe')).toBe(true)
+  const restored = await manager.setBundleEnabled(exa, true)
+  expect(restored.error).toBeUndefined()
+  expect(restored).toMatchObject({ application: 'applied' })
   expect(readProfileManifest('test', dir).dsh?.profile?.bundles).toContain(exa)
   expect(readProfileManifest('test', dir).dsh?.profile?.bundles).not.toContain(perplexity)
+  expect(ctx.get('exaSearchProbe')).toBe(true)
+  expect(ctx.get('perplexitySearchProbe')).toBeUndefined()
 })
 
 it('reports an overlay overriding a saved plugin toggle', async () => {

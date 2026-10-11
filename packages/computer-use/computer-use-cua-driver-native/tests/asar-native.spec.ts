@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, rm, symlink, unlink, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, realpath, rm, symlink, unlink, writeFile } from 'node:fs/promises'
 import { createRequire, stripTypeScriptTypes } from 'node:module'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -39,11 +39,16 @@ describe('packaged Cua native library path', () => {
     const resolver = sdkRequire('@ubjs/node/typescript/dist/resolve-lib.js') as InstalledResolver
     const original = resolver.resolveLibPath
     const electron = Object.getOwnPropertyDescriptor(process.versions, 'electron')
-    const root = await mkdtemp(join(tmpdir(), 'dsh-cua-asar-'))
-    const modules = join(root, 'node_modules')
+    // Windows TMP can use an 8.3 alias; use the same canonical root for imports and junctions.
+    const root = await realpath(await mkdtemp(join(tmpdir(), 'dsh-cua-asar-')))
+    const modules = join(root, 'node_modules', '@trycua')
+    const sdkLink = join(modules, 'cua-driver')
     let linked = false
     try {
-      await symlink(fileURLToPath(new URL('../node_modules', import.meta.url)), modules, 'junction')
+      await mkdir(modules, { recursive: true })
+      // Link the installed package itself, rather than relocating pnpm's relative dependency links.
+      const sdkDirectory = await realpath(fileURLToPath(new URL('../node_modules/@trycua/cua-driver', import.meta.url)))
+      await symlink(sdkDirectory, sdkLink, 'junction')
       linked = true
       const archive = join(root, 'app.asar')
       const unpacked = join(root, 'app.asar.unpacked')
@@ -86,7 +91,7 @@ describe('packaged Cua native library path', () => {
       resolver.resolveLibPath = original
       if (electron === undefined) Reflect.deleteProperty(process.versions, 'electron')
       else Object.defineProperty(process.versions, 'electron', electron)
-      if (linked) await unlink(modules)
+      if (linked) await unlink(sdkLink)
       await rm(root, { recursive: true, force: true })
     }
     expect(resolver.resolveLibPath).toBe(original)
