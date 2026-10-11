@@ -90,6 +90,12 @@
   name: '@deepseek-ai/dsh-tool-bash'
   disabled: true
 
+# Persistent pwsh owns this tool on every platform; omit the stateless provider
+# and its incompatible exit-marker prompt on Windows as well.
+- id: tool-pwsh
+  name: '@deepseek-ai/dsh-tool-pwsh'
+  disabled: true
+
 - insert:
     - id: tool-pwsh-persistent
       name: '@deepseek-ai/dsh-tool-pwsh-persistent'
