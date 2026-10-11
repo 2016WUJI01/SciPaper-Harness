@@ -729,8 +729,8 @@ async function main(): Promise<void> {
     // A confirmation on a hidden window would go unseen, so it waits for show or restore; the mandatory
     // flow keeps its own taskbar and Dock attention instead.
     if (!isMandatory() && !await waitForUpdateWindow(currentDialogWindow(), updateWindowWait.signal)) return state
-    // A quit can begin while the show is awaited.
-    if (quitting) return state
+    // A quit can begin while the show is awaited; re-read through the lifecycle accessor.
+    if (isQuitting()) return state
     return updates.install(version)
   }
 

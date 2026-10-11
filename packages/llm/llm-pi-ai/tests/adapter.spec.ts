@@ -414,20 +414,41 @@ describe('PiAiAdapter provider routing', () => {
   })
 
   it('stops the SDK request when the adapter idle watchdog expires', async () => {
-    const server = await mockServer([{ events: textEvents, delayMs: 200 }])
+    // Keep the wire open: a finite replay can close naturally and make a
+    // missing SDK abort look successful. Freeze only deadlines, not network I/O.
+    const server = await mockServer([{ events: textEvents.slice(0, 2), holdOpen: true }])
     const ctx = await harness(server.url, { streamIdleTimeoutMs: 20 })
+    const caller = new AbortController()
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    const iterator = ctx.llm.stream({
+      provider: 'deepseek', model: 'deepseek-flash', messages: [], signal: caller.signal,
+    })[Symbol.asyncIterator]()
+    try {
+      // Observe SDK delivery before advancing time. Slow connection setup on
+      // an instrumented Windows worker must not consume the idle interval.
+      expect((await iterator.next()).value).toMatchObject({ type: 'block-start' })
+      expect((await iterator.next()).value).toMatchObject({ type: 'text-delta', text: 'hello' })
+      let settled = false
+      const pending = iterator.next().then((result) => { settled = true; return result })
+      await vi.advanceTimersByTimeAsync(19)
+      expect(settled).toBe(false)
+      expect(server.closedResponses).toBe(0)
+      await vi.advanceTimersByTimeAsync(1)
+      vi.useRealTimers()
 
-    const result = await assemble(ctx, { model: 'deepseek-flash', messages: [] })
-    expect(result.finish).toMatchObject({ kind: 'error', failure: { code: 'TIMEOUT' } })
-    await Promise.race([
-      server.responseClosed,
-      new Promise<never>((_resolve, reject) => {
-        setTimeout(() => { reject(new Error('SDK request did not close after idle timeout')) }, 1_000)
-      }),
-    ])
-
-    expect(server.paths).toEqual(['/chat/completions'])
-    expect(server.closedResponses).toBe(1)
+      expect((await pending).value).toMatchObject({
+        type: 'finish', reason: { kind: 'error', failure: { code: 'TIMEOUT' } },
+      })
+      // The runner's lane budget bounds this real socket-close observation.
+      // It must happen before caller/fixture cleanup can close the connection.
+      await server.responseClosed
+      expect(server.paths).toEqual(['/chat/completions'])
+      expect(server.closedResponses).toBe(1)
+    } finally {
+      vi.useRealTimers()
+      caller.abort()
+      await iterator.return?.()
+    }
   })
 })
 

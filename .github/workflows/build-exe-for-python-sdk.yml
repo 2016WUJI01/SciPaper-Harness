@@ -371,9 +371,13 @@ jobs:
             Pop-Location
           }
 
+      # Live API validation is mandatory only in upstream CI or explicitly opted-in
+      # repositories (DSH_LIVE_E2E=1). Keyless packaging checks always run; an
+      # enabled live lane must fail rather than silently skip a missing key.
       - name: Preflight installed-wheel real API test (POSIX)
         if: >-
           inputs.ci
+          && (github.repository == 'deepseek-harness/deepseek-harness' || vars.DSH_LIVE_E2E == '1')
           && runner.os != 'Windows'
           && (github.event_name != 'pull_request'
               || !(github.event.pull_request.head.repo.fork
@@ -390,6 +394,7 @@ jobs:
       - name: Preflight installed-wheel real API test (Windows)
         if: >-
           inputs.ci
+          && (github.repository == 'deepseek-harness/deepseek-harness' || vars.DSH_LIVE_E2E == '1')
           && runner.os == 'Windows'
           && (github.event_name != 'pull_request'
               || !(github.event.pull_request.head.repo.fork
@@ -405,6 +410,7 @@ jobs:
       - name: Run installed-wheel real API black-box test (POSIX)
         if: >-
           inputs.ci
+          && (github.repository == 'deepseek-harness/deepseek-harness' || vars.DSH_LIVE_E2E == '1')
           && runner.os != 'Windows'
           && (github.event_name != 'pull_request'
               || !(github.event.pull_request.head.repo.fork
@@ -425,6 +431,7 @@ jobs:
       - name: Run installed-wheel real API black-box test (Windows)
         if: >-
           inputs.ci
+          && (github.repository == 'deepseek-harness/deepseek-harness' || vars.DSH_LIVE_E2E == '1')
           && runner.os == 'Windows'
           && (github.event_name != 'pull_request'
               || !(github.event.pull_request.head.repo.fork

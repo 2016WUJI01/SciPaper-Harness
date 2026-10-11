@@ -1,4 +1,5 @@
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { realpath } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -27,9 +28,10 @@ for (const permission of [true, false]) it(`preserves local-file permission ${pe
   })
   await normalizeDeployedBuildRules(deployment, workspace)
   expect(load(readFileSync(path, 'utf8'))).toEqual({
-    allowBuilds: { [`@scope/helper@${pathToFileURL(realpathSync(local)).href}`]: permission, koffi: true, protobufjs: false },
+    allowBuilds: { [`@scope/helper@${pathToFileURL(await realpath(local)).href}`]: permission, koffi: true, protobufjs: false },
     patchedDependencies: { native: '../native.patch' },
   })
+  // The async native resolver expands Windows 8.3 aliases; the legacy sync JS resolver need not.
   const first = readFileSync(path, 'utf8')
   await normalizeDeployedBuildRules(deployment, workspace)
   expect(readFileSync(path, 'utf8')).toBe(first)
@@ -39,7 +41,7 @@ it('rejects conflicting permissions without rewriting the staged policy', async 
   const { workspace, deployment, local, path } = fixture(test, {})
   const original = dump({ allowBuilds: {
     '@scope/helper@file:packages/local # helper': true,
-    [`@scope/helper@${pathToFileURL(realpathSync(local)).href}`]: false,
+    [`@scope/helper@${pathToFileURL(await realpath(local)).href}`]: false,
   } })
   writeFileSync(path, original)
   await expect(normalizeDeployedBuildRules(deployment, workspace)).rejects.toThrow('conflicting build permissions')
@@ -68,7 +70,7 @@ for (const conflict of [false, true]) it(`canonicalizes absolute junction aliase
     expect(readFileSync(path, 'utf8')).toBe(original)
   } else {
     await normalizeDeployedBuildRules(deployment, workspace)
-    expect(load(readFileSync(path, 'utf8'))).toEqual({ allowBuilds: { [`@scope/helper@${pathToFileURL(realpathSync(local)).href}`]: false } })
+    expect(load(readFileSync(path, 'utf8'))).toEqual({ allowBuilds: { [`@scope/helper@${pathToFileURL(await realpath(local)).href}`]: false } })
   }
 })
 
