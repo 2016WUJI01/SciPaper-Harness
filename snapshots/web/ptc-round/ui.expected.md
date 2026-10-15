@@ -1,6 +1,7 @@
 - banner:
   - navigation "Session hierarchy": "Using ONE run_code program: run"
   - text: PTC mode
+  - button "Stop all"
   - button "More actions"
   - button "Open right sidebar"
   - tablist:
@@ -8,6 +9,8 @@
     - tab "Trajectory"
 - text: "Using ONE run_code program: run bash `echo CODE_ROUND_OK`, then read the file missing.txt catching its error in the program. Return an object with both outcomes. Then reply DONE and stop. {{clock}}"
 - button "Copy"
+- button "Edit and resend"
+- button "Resend"
 - status: Completed
 - button "Completed in {{duration}}" [expanded]
 - button "Ran code, ran commands, read files" [expanded]
@@ -25,9 +28,9 @@
 - button "Copy"
 - button "Good response"
 - button "Bad response"
-- button "Branch into a new conversation"
+- button "Continue from here"
 - text: {{clock}}
-- textbox "Message or run a task, / commands, @ files or sessions"
+- textbox "Keep going, or drop in papers and data; / for commands, @ for files or conversations"
 - button "Add files or run commands"
 - 'button "Access mode, current: Workspace Write"': Workspace Write
 - button "Select model, current DeepSeek-V4-Flash": DeepSeek-V4-Flash

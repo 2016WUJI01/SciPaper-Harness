@@ -13,6 +13,7 @@ import {
   SessionFormatUnsupportedMigrationError,
   sessionFormatCatalog,
 } from '@deepseek-ai/dsh-session-format-catalog'
+import type { SessionFormatHeader } from '@deepseek-ai/dsh-session-format'
 import { readdirSync, type Dirent } from 'node:fs'
 import { open, mkdir, readdir, realpath, link, rm, stat, truncate } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
@@ -34,7 +35,7 @@ import {
 import { JsonlBackendTracker, JsonlSessionHandle, type StorageHandleState } from './storage.ts'
 import { SessionWriteLease } from './lease.ts'
 import { SESSION_FORMAT_VERSION, SessionId as makeSessionId, SessionLogOffset } from '@deepseek-ai/dsh-session'
-import type { SessionEvent, SessionId, SessionHeader, SessionLogOffset as SessionLogOffsetType } from '@deepseek-ai/dsh-session'
+import type { SessionEvent, SessionExecution, SessionId, SessionHeader, SessionLogOffset as SessionLogOffsetType } from '@deepseek-ai/dsh-session'
 import {
   assertNoRetiredHeaderFields, encodeSegment, eventLines, generationLogFilename, generationLogPath, logPath, logSuffix,
   parseGenerationLogFilename, projectDir, scanLog, sessionDir, SessionLogScanner, toHeaderLine,
@@ -64,6 +65,9 @@ export type { JsonlCompression } from './format.ts'
  * log, so the memo only needs the sessions in flight between those steps.
  */
 const COLD_LOG_MEMO_MAX_ENTRIES = 2
+
+/** Native V5 decoding and the V4-to-V5 migration both supply explicit execution identity. */
+type NormalizedCurrentHeader = SessionFormatHeader & { readonly execution: SessionExecution }
 
 const DEFAULT_COMPRESSION: JsonlCompression = 'zstd'
 /**
@@ -1139,19 +1143,8 @@ class JsonlSessionPersistence extends SessionPersistence {
     return header
   }
 
-  /** Convert format-catalog string identities to current branded Session metadata. */
-  private currentHeader(header: {
-    readonly version: number
-    readonly id: string
-    readonly createdAt: number
-    readonly cwd?: string
-    readonly execution?: { readonly kind: 'local' } | { readonly kind: 'ssh'; readonly host: string }
-    readonly parentSession?: string
-    readonly isSeeded: boolean
-    readonly origin?: 'subagent'
-    readonly delegationDepth: number
-    readonly agentPreset?: string
-  }): SessionHeader {
+  /** Preserve catalog-normalized execution while branding current Session identities. */
+  private currentHeader(header: SessionFormatHeader): SessionHeader {
     /* v8 ignore next 3 -- readable catalog results are restored to its configured current version. */
     if (header.version !== SESSION_FORMAT_VERSION) {
       throw new Error(`format catalog returned non-current logical header v${header.version}`)
@@ -1161,7 +1154,7 @@ class JsonlSessionPersistence extends SessionPersistence {
       id: makeSessionId(header.id),
       createdAt: header.createdAt,
       ...(header.cwd === undefined ? {} : { cwd: header.cwd }),
-      execution: header.execution ?? { kind: 'local' },
+      execution: (header as NormalizedCurrentHeader).execution,
       ...(header.parentSession === undefined
         ? {}
         : { parentSession: makeSessionId(header.parentSession) }),

@@ -1,6 +1,7 @@
 - banner:
   - navigation "Session hierarchy": Use one run_code program to
   - text: PTC mode
+  - button "Stop all"
   - button "More actions"
   - button "Open right sidebar"
   - tablist:
@@ -8,6 +9,8 @@
     - tab "Trajectory"
 - text: "Use one run_code program to do the following in order. Call present for missing.txt and catch its error without creating that file. Use bash to run exactly `printf \"DELIVERED_REPORT\\n\" > report.txt; printf \"DELIVERED_NOTE\\n\" > 说明.txt`. Call present for report.txt and 说明.txt. After present succeeds, deliberately throw the string \"AFTER_PRESENT\" (not an Error object) from that same run_code program. Do not retry the program or create any other files. Finish by mentioning `report.txt` and `说明.txt` in inline code, and put PRESENT_DONE in a separate paragraph. {{clock}}"
 - button "Copy"
+- button "Edit and resend"
+- button "Resend"
 - status: Completed
 - button "Completed in {{duration}}" [expanded]
 - button "Called tools, ran code, ran commands" [expanded]
@@ -46,10 +49,10 @@
 - button "Copy"
 - button "Good response"
 - button "Bad response"
-- button "Branch into a new conversation"
+- button "Continue from here"
 - button "Usage 19K tok"
 - text: {{clock}}
-- textbox "Message or run a task, / commands, @ files or sessions"
+- textbox "Keep going, or drop in papers and data; / for commands, @ for files or conversations"
 - button "Add files or run commands"
 - 'button "Access mode, current: Workspace Write"': Workspace Write
 - button "Select model, current DeepSeek-V4-Flash": DeepSeek-V4-Flash

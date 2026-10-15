@@ -47,7 +47,7 @@ The source codec validates V4 before conversion. A seeded source retains its inh
 
 `assertReleasedV5Header` requires version 5 and accepts either `{ kind: 'local' }` or `{ kind: 'ssh', host }`; an SSH host is nonempty and its `cwd`, when present, is an absolute POSIX path. A missing `execution` is treated as local for legacy callers, while V5 encoding writes the normalized identity. SSH `cwd` is omitted from V4 validation and checked against the POSIX rule separately.
 
-`restoreReleasedV5Artifact` applies the released V4 event relationship rules and validates V5 delivery markers against their owning Session and preceding sequence. `assertReleasedV5Relationships` performs the same relationship checks without replacing the artifact. Neither entry performs SSH connection checks or filesystem reads.
+`restoreReleasedV5Artifact` validates V5 delivery markers against their owning Session and preceding sequence before applying the shared V4 event relationship rules. Historical delivery markers keep their generation-specific validation. `assertReleasedV5Relationships` performs the same relationship checks without replacing the artifact. Neither entry performs SSH connection checks or filesystem reads.
 
 <a id="further-exploration"></a>
 ## Further Exploration

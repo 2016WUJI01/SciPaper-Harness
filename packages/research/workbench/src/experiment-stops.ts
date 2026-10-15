@@ -66,7 +66,7 @@ export class ExperimentStops {
       }
     }
     const controller = new AbortController()
-    let release = (): void => {}
+    let release!: () => void
     const ready = new Promise<void>((resolve) => { release = resolve })
     const admission: Admission = {
       project: structuredClone(project), run: structuredClone(run), owners, controller,
@@ -169,7 +169,7 @@ export class ExperimentStops {
     try {
       let run = this.current(admission)
       status = run.status
-      let abort = (): void => {}
+      let abort!: () => void
       try {
         await Promise.race([admission.ready, new Promise<never>((_resolve, reject) => {
           abort = () => { reject(new Error('Experiment stop deadline reached')) }

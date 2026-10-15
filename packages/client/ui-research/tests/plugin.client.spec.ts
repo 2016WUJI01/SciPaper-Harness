@@ -37,9 +37,9 @@ import { ResearchSourcesTab } from '../src/client/Sources.tsx'
 import { ResearchDiagramTab } from '../src/client/Diagram.tsx'
 import { ResearchClaimSheet } from '../src/client/ClaimSheet.tsx'
 import { ResearchRuns } from '../src/client/RunPanel.tsx'
-import { ResearchStatusChip } from '../src/client/Header.tsx'
+import { ResearchProjectContext, ResearchStatusChip } from '../src/client/Header.tsx'
 import { ResearchTree } from '../src/client/ResearchTree.tsx'
-import { ResearchEntryLine, ResearchTryChips } from '../src/client/EntryScreen.tsx'
+import { ResearchEntryLine, ResearchTryChips, ResearchWorkspaceLabel } from '../src/client/EntryScreen.tsx'
 import { ResearchFolderMenu } from '../src/client/FolderMenu.tsx'
 import { ResearchSettingsSection } from '../src/client/ResearchSettings.tsx'
 import { SkipHarnessNotice } from '../src/client/Onboarding.tsx'
@@ -185,6 +185,7 @@ async function bench(services: BenchServices = {}) {
       'sidebar.brand.name': { kind: 'single', scope: 'root' },
       'sidebar.brand.mark': { kind: 'single', scope: 'root' },
       'conversation.session.header.actions': { kind: 'list', scope: 'session' },
+      'conversation.session.header.context': { kind: 'single', scope: 'session' },
       'conversation.session.header.utilities': { kind: 'list', scope: 'session' },
       'sidebar.projects': { kind: 'list', scope: 'root' },
       'sidebar.workspaces': { kind: 'single', scope: 'root' },
@@ -192,6 +193,7 @@ async function bench(services: BenchServices = {}) {
       'conversation.hero.footer': { kind: 'list', scope: 'root' },
       'conversation.hero.brand.mark': { kind: 'single', scope: 'root' },
       'conversation.hero.workspace': { kind: 'single', scope: 'root' },
+      'conversation.hero.workspace.label': { kind: 'single', scope: 'root' },
       'conversation.input.dock': { kind: 'list', scope: 'session' },
       'conversation.input.left': { kind: 'list', scope: 'session' },
       'conversation.composer.dock': { kind: 'list', scope: 'session' },
@@ -255,13 +257,14 @@ async function bench(services: BenchServices = {}) {
   const list = createSnapshotStore<SessionListState>(rows(services.sessions ?? { 'session-a': { cwd: 'C:\\research\\sparse' }, 'session-b': {} }))
   // Each listed session renames itself through its binding; an unknown one has none.
   const renames = new Map<string, ReturnType<typeof vi.fn>>()
+  const sessionCommand = vi.fn((_input: string): Answer<{ matched: boolean }> => Promise.resolve(ok({ matched: true })))
   const sessions = {
     list,
     retain: vi.fn(() => ({ release: vi.fn() })),
     binding: vi.fn((id: string) => {
       if (!(id in list.getSnapshot().byId)) return undefined
       if (!renames.has(id)) renames.set(id, vi.fn((_title: string) => Promise.resolve(ok({ title: _title, seq: 1 }))))
-      return { session: { rename: renames.get(id) } }
+      return { session: { rename: renames.get(id), command: sessionCommand } }
     }),
     search: vi.fn((_query: string, _signal: AbortSignal) => Promise.resolve(ok({ items: [{ sessionId: 'session-a', snippet: 'measured 42' }], hasMore: false }))),
     searchResultLimit: 20,
@@ -367,7 +370,7 @@ async function bench(services: BenchServices = {}) {
   return {
     ctx, dictionaries, directoryPicker, entry, face: injected, fiber, layout, remote, remoteSession, seat, tabs, policies,
     publishSessions, select, list, workspaceList, sidebarRight, uiWorkspace, sessions, renames, workspaces,
-    panel, presetScope, unsetPreset, bound,
+    panel, presetScope, unsetPreset, bound, sessionCommand,
   }
 }
 
@@ -482,6 +485,7 @@ describe('the research plugin', () => {
     expect(b.seat('sidebar.brand.mark')).toMatchObject({ component: ResearchMark })
     expect(b.seat('conversation.session.header.actions', 'research-status'))
       .toMatchObject({ locale: 'research', component: ResearchStatusChip, options: { order: 5 } })
+    expect(b.seat('conversation.session.header.context')).toMatchObject({ locale: 'research', component: ResearchProjectContext, options: { priority: -1 } })
     expect(b.seat('conversation.hero.brand.mark')).toMatchObject({ component: ResearchHeroMark })
     expect(b.seat('conversation.hero.welcome', 'research-entry'))
       .toMatchObject({ locale: 'research', component: ResearchEntryLine, options: { order: 10 } })
@@ -632,6 +636,7 @@ describe('the research plugin', () => {
       expect(chip).toMatchObject({ locale: 'research', component: AutonomyChip, options: { priority: -1 } })
       expect(Object.keys((chip.inject as unknown as () => ResearchInjected)())).toEqual(Object.keys(b.face))
       // The research's folder menu takes the blank conversation's Workspace picker, with the entry screen's face.
+      expect(b.seat('conversation.hero.workspace.label')).toMatchObject({ locale: 'research', component: ResearchWorkspaceLabel, options: { priority: -1 } })
       const folder = folderWinner(b.ctx)!
       expect(folder).toMatchObject({ locale: 'research', component: ResearchFolderMenu, options: { priority: -1 } })
       expect(Object.keys((folder.inject as unknown as () => ResearchEntryInjected)())).toEqual(Object.keys(b.entry))
@@ -650,6 +655,7 @@ describe('the research plugin', () => {
       expect(winners(b.ctx)).toEqual([[['stats', Shipped]], [['permission', Shipped]], [['open-document', Shipped]]])
       expect(accessWinner(b.ctx)?.component).toBe(Shipped)
       expect(folderWinner(b.ctx)?.component).toBe(Shipped)
+      expect(b.ctx.slots.entriesOfSlot('conversation.hero.workspace.label')).toEqual([])
       expect(browserWinner(b.ctx)?.component).toBe(Shipped)
       expect(b.ctx.slots.entriesOfSlot(FLOW_SEAT)[0]?.component).toBe(Flow)
     } finally {
@@ -666,6 +672,7 @@ describe('the research plugin', () => {
       expect(winners(b.ctx)).toEqual([[['stats', Shipped]], [['permission', Shipped]], [['open-document', Shipped]]])
       expect(accessWinner(b.ctx)?.component).toBe(Shipped)
       expect(folderWinner(b.ctx)?.component).toBe(Shipped)
+      expect(b.ctx.slots.entriesOfSlot('conversation.hero.workspace.label')).toEqual([])
       expect(browserWinner(b.ctx)?.component).toBe(Shipped)
       await stop(b)
     }
@@ -1346,6 +1353,25 @@ describe('the face the research tree acts through', () => {
     expect(b.remote.create).toHaveBeenCalledWith(NEW_PROJECT)
   })
 
+  it('opens only listed project results and reports ordinary-start failures through the shell feedback', async () => {
+    vi.useFakeTimers()
+    const b = await treeBench({ current: 'session-a' })
+    await b.tree.openResult({ message: 'confirmation needed' })
+    expect(b.uiWorkspace.openSession).not.toHaveBeenCalled()
+    await b.tree.openResult({ message: 'opened', sessionId: 'session-b' })
+    expect(b.uiWorkspace.openSession).toHaveBeenCalledExactlyOnceWith('session-b')
+    const missing = expect(b.tree.openResult({ message: 'opened', sessionId: 'missing' })).rejects.toThrow(en.entryNotListed)
+    await vi.advanceTimersByTimeAsync(5000)
+    await missing
+    b.remote.command.mockResolvedValueOnce(bad('ordinary folder unavailable'))
+    b.tree.startOrdinary()
+    await flush()
+    expect(b.remote.command).toHaveBeenLastCalledWith({ action: 'start-conversation', sessionId: 'session-b', ordinary: true }, expect.any(AbortSignal))
+    expect(b.entry.hooks.entry.getSnapshot().notice).toMatchObject({ kind: 'failed', reason: 'ordinary folder unavailable' })
+    b.entry.dismissNotice()
+    expect(b.entry.hooks.entry.getSnapshot()).toEqual({ notice: null })
+  })
+
   it('renames a conversation through its own session, and says why an unknown or refused one failed', async () => {
     const b = await treeBench()
     await b.tree.renameConversation('session-a' as SessionId, 'Measured sample')
@@ -1417,4 +1443,18 @@ describe('the face the research tree acts through', () => {
     await expect(b.tree.searchConversations('42', signal)).rejects.toThrow('content search is off')
     expect(b.tree.searchResultLimit).toBe(20)
   })
+})
+
+it('changes an ordinary conversation permission preset through its listed session and exposes refusal', async () => {
+  const b = await bench()
+  await b.face.setConversationAutonomy('session-a' as SessionId, 'automatic')
+  expect(b.sessionCommand).toHaveBeenLastCalledWith('/permission research-auto')
+  await b.face.setConversationAutonomy('session-a' as SessionId, 'checkpoints')
+  expect(b.sessionCommand).toHaveBeenLastCalledWith('/permission workspace-write')
+  b.sessionCommand.mockResolvedValueOnce(ok({ matched: false }))
+  await expect(b.face.setConversationAutonomy('session-a' as SessionId, 'automatic')).rejects.toThrow(en.autonomyUnavailable)
+  b.sessionCommand.mockResolvedValueOnce(bad('session unavailable'))
+  await expect(b.face.setConversationAutonomy('session-a' as SessionId, 'automatic')).rejects.toThrow('session unavailable')
+  await expect(b.face.setConversationAutonomy('missing' as SessionId, 'automatic')).rejects.toThrow(en.entryNotListed)
+  expect(b.remote.command).not.toHaveBeenCalled()
 })

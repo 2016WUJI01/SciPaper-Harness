@@ -544,3 +544,18 @@ describe('JobListAction human kill', () => {
     expect(document.querySelector('[data-kill-state]')).toBeNull()
   })
 })
+
+
+it('shows the stop-all pending state without rows and clears an unconfirmed fallback after retry', async () => {
+  const stopped = Promise.withResolvers<{ confirmed: boolean; failures: string[] }>()
+  const stopAllJobs = vi.fn(() => stopped.promise)
+  render(<JobListAction {...props([])} stopAllJobs={stopAllJobs} />)
+  fireEvent.click(screen.getByRole('button', { name: zh['killAll.stop'] }))
+  expect(screen.getByRole('button', { name: zh['killAll.stopping'] }).hasAttribute('disabled')).toBe(true)
+  await act(async () => { stopped.resolve({ confirmed: false, failures: [] }) })
+  expect(screen.getByRole('alert').textContent).toContain(zh['killAll.unconfirmed'])
+  stopAllJobs.mockResolvedValueOnce({ confirmed: true, failures: [] })
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: zh['killAll.stop'] })) })
+  expect(screen.queryByRole('alert')).toBeNull()
+  expect(stopAllJobs).toHaveBeenCalledTimes(2)
+})

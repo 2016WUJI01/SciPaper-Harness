@@ -77,6 +77,56 @@ it('converts SSH byte windows without reading a same-path local file', async () 
   expect(read).not.toHaveBeenCalled()
 })
 
+it.each([
+  { offset: 1, data: rawSource.data },
+  { offset: 0, data: new Uint8Array(5) },
+  { offset: 0, data: new Uint8Array(), eof: false },
+  { offset: 0, data: rawSource.data, bytes: 5 },
+  { offset: 0, data: rawSource.data.subarray(0, 3), eof: true },
+])('refuses an inconsistent SSH byte window %j', async (window) => {
+  const sshScope = { ...scope, execution: { kind: 'ssh' as const, host: 'lab' } }
+  authorize.mockResolvedValueOnce({ ...wireSource, data: rawSource.data.subarray(0, 1) })
+    .mockResolvedValueOnce({ ...wireSource, ...window })
+  await expect(ctx.officeToPdf.render(sshScope, 'report.DOCX', 'foreground', new AbortController().signal))
+    .rejects.toMatchObject({ code: 'document-render/failed', details: { reason: 'source-changed' } })
+  expect(read).not.toHaveBeenCalled()
+  expect(authorize).toHaveBeenCalledTimes(2)
+})
+
+it('rejects SSH bytes beyond the reserved capacity after checking source identity again', async () => {
+  const sshScope = { ...scope, execution: { kind: 'ssh' as const, host: 'lab' } }
+  authorize.mockResolvedValueOnce({ ...wireSource, data: rawSource.data.subarray(0, 1) })
+    .mockResolvedValueOnce({ ...wireSource, eof: false })
+    .mockResolvedValueOnce({ ...wireSource, offset: 4, data: new Uint8Array([5]) })
+  await expect(ctx.officeToPdf.render(sshScope, 'report.DOCX', 'foreground', new AbortController().signal))
+    .rejects.toMatchObject({ code: 'document-render/failed', details: { reason: 'input-too-large' } })
+  expect(authorize).toHaveBeenLastCalledWith(sshScope, 'report.DOCX', { range: { offset: 4, length: 1 } }, expect.any(AbortSignal))
+  expect(metadata).toHaveBeenCalledTimes(2)
+  expect(read).not.toHaveBeenCalled()
+})
+
+it.each([
+  new Error('remote read denied'),
+  new RemoteError('workspace-file/not-found', 'remote source missing', { path: 'report.DOCX' }),
+  null,
+  'remote transport closed',
+])('preserves a non-size SSH read failure without retrying %s', async (cause) => {
+  const sshScope = { ...scope, execution: { kind: 'ssh' as const, host: 'lab' } }
+  authorize.mockResolvedValueOnce({ ...wireSource, data: rawSource.data.subarray(0, 1) }).mockRejectedValueOnce(cause)
+  await expect(ctx.officeToPdf.render(sshScope, 'report.DOCX', 'foreground', new AbortController().signal)).rejects.toBe(cause)
+  expect(authorize).toHaveBeenCalledTimes(2)
+  expect(read).not.toHaveBeenCalled()
+})
+
+it('stops reducing an SSH byte window once a one-byte read still exceeds the remote cap', async () => {
+  const sshScope = { ...scope, execution: { kind: 'ssh' as const, host: 'lab' } }
+  const cause = new RemoteError('workspace-file/too-large', 'Remote cap exhausted.', { path: 'report.DOCX', limit: 0 })
+  authorize.mockResolvedValueOnce({ ...wireSource, data: rawSource.data.subarray(0, 1) }).mockRejectedValue(cause)
+  await expect(ctx.officeToPdf.render(sshScope, 'report.DOCX', 'foreground', new AbortController().signal)).rejects.toBe(cause)
+  expect(authorize.mock.calls.slice(1).map(call => call[2]?.range?.length)).toEqual([4, 2, 1])
+  expect(read).not.toHaveBeenCalled()
+})
+
 it('rejects changed SSH bytes without falling back to a same-path local file', async () => {
   const sshScope = { ...scope, execution: { kind: 'ssh' as const, host: 'lab' } }
   authorize.mockResolvedValueOnce({ ...wireSource, eof: false, data: rawSource.data.subarray(0, 1) })

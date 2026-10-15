@@ -5,6 +5,7 @@
     - button "模型"
     - button "内置插件"
     - button "Agent 预设"
+  - text: 模型
   - button "打开配置文件"
   - button "关闭"
   - heading "模型" [level=2]
@@ -47,6 +48,13 @@
             - /placeholder: 显示名称
           - button "模型选项 1" [expanded]
           - button "删除模型 1"
+          - group "推理强度档位":
+            - text: 推理强度档位
+            - combobox "推理强度档位 1":
+              - option "使用内置模型能力" [selected]
+              - option "不支持选择推理强度"
+              - option "配置支持的档位"
+            - paragraph: 不在内置目录中的模型，配置档位后，会话里才会出现推理强度菜单。
           - text: 上下文窗口
           - textbox "上下文窗口 1":
             - /placeholder: 256K

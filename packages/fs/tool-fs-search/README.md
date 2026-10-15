@@ -71,7 +71,7 @@ The generated [configuration catalog](../../../docs/config-catalog.md#deepseek-a
 
 ### Deployment requirement
 
-Node deployments receive the `@vscode/ripgrep` platform package on supported macOS, Linux, and Windows targets; Python SDK wheels copy the target-native binary beside the single-file runtime as a `-rg` sidecar. A remote subprocess composition sets `rgPath` to an executable installed on its remote host. Returned paths are displayed relative to the resolved workdir (the calling session's cwd when present) and are follow-up-readable with `read` only when that workdir and the filesystem root are the same workspace.
+Node deployments receive the `@vscode/ripgrep` platform package on supported macOS, Linux, and Windows targets; Python SDK wheels copy the target-native binary beside the single-file runtime as a `-rg` sidecar. A remote subprocess composition sets `rgPath` to an executable installed on its remote host. Sampling recognizes the local path separator and POSIX slashes from SSH; on POSIX hosts, backslashes remain filename characters. Returned paths are displayed relative to the resolved workdir (the calling session's cwd when present) and are follow-up-readable with `read` only when that workdir and the filesystem root are the same workspace.
 
 ### Failures and recovery
 

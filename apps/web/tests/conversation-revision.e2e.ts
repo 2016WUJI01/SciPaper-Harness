@@ -45,6 +45,13 @@ async function selectedSession(): Promise<SessionId> {
   return SessionId(key.slice('conversation:'.length))
 }
 
+/** Wait for the visible navigation after the fork and optional child rename finish. */
+async function waitForForkSelection(previous: SessionId): Promise<void> {
+  await page.getByRole('tree', { name: 'Research projects', exact: true })
+    .locator(`[role="treeitem"][aria-selected="true"][data-key^="conversation:"]:not([data-key="conversation:${previous}"])`)
+    .waitFor()
+}
+
 async function settled(): Promise<void> {
   const id = await selectedSession()
   await expect.poll(async () => (await scaffold.ctx.sessionController.list({}, new AbortController().signal))
@@ -71,7 +78,7 @@ it('edits, resends and continues from an earlier answer while retaining the orig
   await expect.poll(() => dialog.evaluate(element => getComputedStyle(element).opacity)).toBe('1')
   await saveFailureShot(page, 'conversation-revision-editor')
   await dialog.getByRole('button', { name: 'Resend', exact: true }).click()
-  await expect.poll(() => selectedSession()).not.toBe(originalId)
+  await waitForForkSelection(originalId)
   await page.getByText('Revised instruction', { exact: true }).waitFor()
   await page.getByText('Recorded.', { exact: true }).waitFor()
   await settled()
@@ -79,13 +86,13 @@ it('edits, resends and continues from an earlier answer while retaining the orig
   const editedId = await selectedSession()
   expect((await scaffold.ctx.sessionController.inspect(originalId)).events).toEqual(original.events)
   await page.getByRole('button', { name: 'Resend', exact: true }).click()
-  await expect.poll(() => selectedSession()).not.toBe(editedId)
+  await waitForForkSelection(editedId)
   await page.getByText('Recorded.', { exact: true }).waitFor()
   await settled()
   await page.getByRole('tree').locator(`[data-key="conversation:${originalId}"]`).click()
   await expect.poll(() => page.getByText('Recorded.', { exact: true }).count()).toBe(2)
   await page.getByRole('button', { name: 'Continue from here', exact: true }).first().click()
-  await expect.poll(() => selectedSession()).not.toBe(originalId)
+  await waitForForkSelection(originalId)
   await page.locator('[data-chat-flow-kind="user"]').getByText('Original instruction', { exact: true }).waitFor()
   expect(await page.getByText('Later instruction', { exact: true }).count()).toBe(0)
   const continued = await scaffold.ctx.sessionController.inspect(await selectedSession())

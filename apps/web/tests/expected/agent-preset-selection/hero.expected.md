@@ -1,2 +1,2 @@
-- button "Choose workspace": workspace
+- button "Choose project": workspace
 - button "Standard mode"

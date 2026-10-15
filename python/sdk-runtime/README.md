@@ -48,6 +48,10 @@ External profile management uses `dsh plugin --profile <name> ...`. That command
 
 ## Build and distribution
 
+The executable builder GZip-compresses the SEA archive before injection to keep the complete dependency closure within the injector's memory limits. Packaged files decompress on demand at runtime.
+
+Deployment derives a frozen production lockfile from the shared workspace lockfile; legacy hoisted deployment is disabled because it re-resolves dependency ranges. Deferred lifecycle scripts run only after existing local-file build permissions are translated to their exact deployed file URLs; explicit denials remain unchanged. Dependency restoration checks the complete installed graph across the source and staging trees. Matching versions from the same installed source share one copy; distinct installed sources or versions remain nested, and conflicting destinations fail instead of merging files. Deployed lookup stays inside staging.
+
 Production deployment permits unused workspace patches for packages outside the runtime closure; patches for included packages must still apply successfully. This exception is confined to the deploy command; repository installation still rejects unused patches.
 
 From the repository root, `pnpm exec tsx scripts/build-exe-for-python-sdk.ts` verifies the closure, builds packages, deploys a symlink-free tree, packages the selected target, and syncs the executable and sidecars into this module. `scripts/build-python-release.py` stages release-shaped wheels at the root repository version and pins `deepseek-harness-sdk` to the exact runtime version.

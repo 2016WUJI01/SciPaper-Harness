@@ -1,5 +1,8 @@
 - id: session-controller
   inject: [webRestartReady]
+- id: ui-settings-general
+  config:
+    welcomeNoticeVersion: '2026-09-28.1'
 - insert:
     - id: web-restart-startup
       name: ./restart-startup.js

@@ -162,7 +162,7 @@ describe('web e2e: assistant IconActions wait for the turn to end', () => {
     const runningProcess = page.locator('[data-turn-process]')
     expect(await runningProcess.count()).toBe(0)
     await expect.poll(
-      () => page.getByRole('status').filter({ hasText: 'Thinking…' }).isVisible(),
+      () => page.getByRole('status').filter({ hasText: 'Deep diving' }).isVisible(),
       { timeout: 10_000 },
     ).toBe(true)
     await page.locator('[data-streaming="true"]')

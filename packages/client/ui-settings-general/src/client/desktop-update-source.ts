@@ -1,26 +1,19 @@
 /** Client-owned observation of the optional Desktop preload. */
 import { createSnapshotStore } from '@deepseek-ai/dsh-client-store'
 import type { DesktopUpdateBridge, DesktopUpdateView } from '../types.ts'
+import { observeDesktopStatus } from './desktop-status-observer.ts'
 
 /** Owns one preload subscription across both sidebar locations. */
 export class DesktopUpdateSource {
   /** Framework-observed carrier status shared by both sidebar controls. */
   readonly store = createSnapshotStore<DesktopUpdateView>({ failed: false, opening: false })
   private live = true
-  private received = false
   private readonly unsubscribe: (() => void) | undefined
 
   /** @param bridge - Optional isolated Electron API, absent in ordinary browsers. */
   constructor(private readonly bridge: DesktopUpdateBridge | undefined) {
-    this.unsubscribe = bridge?.subscribe((presentation) => {
-      if (!this.live) return
-      this.received = true
-      this.store.set({ ...this.store.getSnapshot(), presentation, failed: false })
-    })
-    void bridge?.status().then((presentation) => {
-      if (this.live && !this.received) this.store.set({ ...this.store.getSnapshot(), presentation })
-    }, () => {
-      if (this.live && !this.received) this.store.set({ ...this.store.getSnapshot(), failed: true })
+    this.unsubscribe = bridge === undefined ? undefined : observeDesktopStatus(bridge, () => this.live, (patch) => {
+      this.store.set({ ...this.store.getSnapshot(), ...patch })
     })
   }
 

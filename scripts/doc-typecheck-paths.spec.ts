@@ -10,8 +10,24 @@ describe('builtDeclarationPath', () => {
       .toBe('./packages/core/session/lib/types/invariant.d.ts')
   })
 
-  it('rejects aliases without a supported source target', () => {
-    expect(() => builtDeclarationPath('./packages/runtime-diagnostics/invariants/source/index.ts'))
-      .toThrow('cannot map workspace source path')
+  it('preserves aliases that already identify built declaration files', () => {
+    for (const candidate of [
+      './packages/research/workbench/lib/typert.remote-client.d.ts',
+      './packages/core/session/lib/types/index.d.ts',
+    ]) {
+      expect(builtDeclarationPath(candidate)).toBe(candidate)
+    }
+  })
+
+  it('rejects aliases outside supported source and built declaration targets', () => {
+    for (const candidate of [
+      './packages/runtime-diagnostics/invariants/source/index.ts',
+      './packages/research/workbench/source/typert.remote-client.d.ts',
+      './packages/research/workbench/lib/typert.remote-client.ts',
+      './packages/research/workbench/lib/typert.remote-client.d.ts.map',
+      './packages/research/workbench/lib/../source/typert.remote-client.d.ts',
+    ]) {
+      expect(() => builtDeclarationPath(candidate)).toThrow('cannot map workspace source path')
+    }
   })
 })

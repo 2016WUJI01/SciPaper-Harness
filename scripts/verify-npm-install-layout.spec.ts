@@ -57,7 +57,10 @@ describe('npm install layout verifier', () => {
       }]])],
     ])
 
-    const dual = buildDualDshRegistry(index, '0.1.1-rc.2')
+    const overrides = { 'fflate@>=0.8.0 <0.8.3': '0.8.3' }
+    const dual = buildDualDshRegistry(Object.assign(index, { overrides }), '0.1.1-rc.2')
+
+    expect(dual.overrides).toBe(overrides)
 
     expect([...dual.get('@deepseek-ai/dsh')?.keys() ?? []]).toEqual(['0.1.0', '0.2.0'])
     expect(dual.get('@deepseek-ai/dsh')?.get('0.1.0')).toMatchObject({

@@ -28,6 +28,10 @@ A build-only benchmark does not deploy, access Cloudflare credentials, or post p
 
 Runner selection does not alter pull-request events, per-PR cancellation, immutable installation, restore-only dependency caching, full workspace build, preview packing, sourcemap removal, or the preview page copied to the deployment root. Cloudflare uploads only the built site to the PR branch alias. The protected-image check requires HTTP 200, no transport content encoding, and gzip magic bytes; the URL comment remains idempotent. Dependabot and other PR authors remain on GitHub-hosted machines.
 
+Every successful preview build validates the local gzip image and retains `apps/web/dist` as the workflow's downloadable `pr-preview-<number>` artifact before optional deployment. Artifact-only runs report that deployment and protected-image verification were not run; they do not post a preview URL. Build, packing, image-validation, and artifact-upload failures still fail the job.
+
+Deployment requires a same-repository PR whose author and triggering actor are not Dependabot, a Cloudflare Pages project, and all four secrets: `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, `CF_ACCESS_CLIENT_ID`, and `CF_ACCESS_CLIENT_SECRET`. Set repository variable `CF_PREVIEW_PROJECT` to the protected Pages project; only `deepseek-harness/deepseek-harness` defaults to `dsh-build-preview`. Forks without this configuration retain artifacts only. Eligible runs must pass protected-image verification before posting the URL; deployment or verification failures remain blocking.
+
 <a id="dev-note"></a>
 
 ## Dev Note

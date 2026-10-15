@@ -1,5 +1,6 @@
 - banner:
   - navigation "Session hierarchy": Clickable links gallery
+  - button "Stop all"
   - button "More actions"
   - button "Open right sidebar"
   - tablist:
@@ -7,6 +8,8 @@
     - tab "Trajectory"
 - text: "Assemble the link gallery: write the report and styles, inspect the sources, and summarize. {{clock}}"
 - button "Copy"
+- button "Edit and resend"
+- button "Resend"
 - status: Completed
 - button "Completed in {{duration}}" [expanded]
 - button "Wrote files, called tools, searched code, etc." [expanded]
@@ -157,7 +160,7 @@
 - button "Continue from here"
 - text: {{clock}}
 - button "Back to bottom"
-- textbox "Message or run a task, / commands, @ files or sessions"
+- textbox "Keep going, or drop in papers and data; / for commands, @ for files or conversations"
 - button "Add files or run commands"
 - 'button "Access mode, current: Workspace Write"': Workspace Write
 - button "Select model, current DeepSeek-V4-Flash": DeepSeek-V4-Flash

@@ -170,4 +170,74 @@ describe('directory delete restrictions', () => {
     expect(api.localFree).toHaveBeenCalledWith(66n)
     expect(commit).not.toHaveBeenCalled()
   })
+
+  it('preserves a preparation failure together with both failed allocation frees', () => {
+    const { root, api, state, closed, child } = fixture()
+    state.apply = 5
+    api.localFree.mockReturnValue(1n as NativePtr)
+    const commit = vi.fn()
+    let failure: unknown
+    try { withDirectoryDenies(bindingTable(api), root, Buffer.alloc(48), () => false, commit) }
+    catch (error) { failure = error }
+    expect(failure).toBeInstanceOf(AggregateError)
+    expect((failure as AggregateError).errors).toHaveLength(3)
+    expect(closed).toEqual([child, root])
+    expect(commit).not.toHaveBeenCalled()
+  })
+
+  it('rejects an invalid root handle before inspecting or closing it', () => {
+    const { root, api } = fixture()
+    api.createFileW.mockReturnValue(-1n as NativePtr)
+    const commit = vi.fn()
+    expect(() => { withDirectoryDenies(bindingTable(api), root, Buffer.alloc(48), () => false, commit) })
+      .toThrow(/CreateFileW/u)
+    expect(api.getFileInformationByHandleEx).not.toHaveBeenCalled()
+    expect(api.closeHandle).not.toHaveBeenCalled()
+    expect(commit).not.toHaveBeenCalled()
+  })
+
+  it('closes a directory whose handle metadata cannot be read', () => {
+    const { root, api, closed } = fixture()
+    api.getFileInformationByHandleEx.mockReturnValue(0)
+    const commit = vi.fn()
+    expect(() => { withDirectoryDenies(bindingTable(api), root, Buffer.alloc(48), () => false, commit) })
+      .toThrow(/GetFileInformationByHandleEx/u)
+    expect(closed).toEqual([root])
+    expect(commit).not.toHaveBeenCalled()
+  })
+
+  it('skips a child replaced with a reparse point after enumeration', () => {
+    const { root, child, api, paths, closed } = fixture()
+    api.getFileInformationByHandleEx.mockImplementation((handle, _class, info) => {
+      info.writeUInt32LE(abi.FILE_ATTRIBUTE_DIRECTORY | (paths.get(handle) === child ? abi.FILE_ATTRIBUTE_REPARSE_POINT : 0))
+      return 1
+    })
+    const commit = vi.fn()
+    withDirectoryDenies(bindingTable(api), root, Buffer.alloc(48), () => false, commit)
+    expect(api.getSecurityInfo).not.toHaveBeenCalled()
+    expect(closed).toEqual([child, root])
+    expect(commit).toHaveBeenCalledOnce()
+  })
+
+  it('rejects a directory entry replaced with a regular file before preparation', () => {
+    const { root, api, state, closed } = fixture()
+    state.attributes = 0
+    const commit = vi.fn()
+    expect(() => { withDirectoryDenies(bindingTable(api), root, Buffer.alloc(48), () => false, commit) })
+      .toThrow(/not a directory/u)
+    expect(closed).toEqual([root])
+    expect(commit).not.toHaveBeenCalled()
+  })
+
+  it('reports a close failure after a successful root commit', () => {
+    const { root, api, paths, closed, child } = fixture()
+    const close = api.closeHandle
+    api.closeHandle = vi.fn((handle) => { close(handle); return paths.get(handle) === root ? 0 : 1 })
+    const commit = vi.fn()
+    expect(() => { withDirectoryDenies(bindingTable(api), root, Buffer.alloc(48), () => false, commit) })
+      .toThrow(/CloseHandle/u)
+    expect(closed).toEqual([child, root])
+    expect(commit).toHaveBeenCalledOnce()
+  })
+
 })

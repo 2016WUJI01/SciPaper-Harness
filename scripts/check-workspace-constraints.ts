@@ -138,6 +138,7 @@ function packageDirs(base: string, depth: number): string[] {
 function workspaceManifests(): WorkspaceManifest[] {
   const manifests: WorkspaceManifest[] = [
     { dir: '.', manifest: rootManifest },
+    { dir: 'benchmarks', manifest: readJson(join(root, 'benchmarks/package.json')) },
   ]
 
   for (const { dir: base, depth } of workspaceGlobs) {

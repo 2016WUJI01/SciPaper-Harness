@@ -12,6 +12,24 @@ import { newProject } from '../src/project.ts'
 import { hashBytes } from '../src/files.ts'
 import type { WorkspaceId } from '@deepseek-ai/dsh-workspace/types'
 
+/** Unreadable executables and failed PDF cleanup are filesystem boundary failures. */
+const fileFaults = vi.hoisted(() => ({ stat: '', pdf: false, history: false }))
+vi.mock('node:fs/promises', async (original) => {
+  const actual = await original<typeof import('node:fs/promises')>()
+  return {
+    ...actual,
+    stat: (...args: Parameters<typeof actual.stat>) => String(args[0]) === fileFaults.stat
+      ? Promise.reject(Object.assign(new Error('unreadable executable'), { code: 'EACCES' })) : actual.stat(...args),
+    rm: (...args: Parameters<typeof actual.rm>) => fileFaults.pdf && String(args[0]).endsWith('main.pdf')
+      ? Promise.reject(Object.assign(new Error('PDF busy'), { code: 'EBUSY' })) : actual.rm(...args),
+  }
+})
+vi.mock('../src/files.ts', async (original) => {
+  const actual = await original<typeof import('../src/files.ts')>()
+  return { ...actual, keepRevision: (...args: Parameters<typeof actual.keepRevision>) => fileFaults.history
+    ? Promise.reject(Object.assign(new Error('History disk full'), { code: 'ENOSPC' })) : actual.keepRevision(...args) }
+})
+
 /** Every process the manager starts, answered by the current script. */
 const scripted = vi.hoisted(() => ({
   calls: [] as { command: string; args: string[]; env: Record<string, string | undefined> | undefined }[],
@@ -45,6 +63,7 @@ function answer(command: string, args: string[]): ProcessResult {
 }
 beforeEach(() => { vi.stubEnv('PATH', ''); scripted.answer = answer })
 afterEach(async () => {
+  fileFaults.stat = ''; fileFaults.pdf = false; fileFaults.history = false
   vi.unstubAllGlobals()
   vi.unstubAllEnvs()
   scripted.calls.length = 0
@@ -248,6 +267,8 @@ describe('TeX distribution selection', () => {
   })
 
   it('initializes managed formats once in writable engine-specific directories and retries a failed initialization', async () => {
+    vi.stubEnv('SystemRoot', undefined)
+    vi.stubEnv('LOCALAPPDATA', undefined)
     const root = await temporary()
     const bin = join(root, 'latex', 'TinyTeX', 'bin', 'windows')
     vi.stubEnv('DSH_HOME', join(root, 'data-home'))
@@ -266,6 +287,9 @@ describe('TeX distribution selection', () => {
     const runtime = await manager.latexRuntime(signal, 'xelatex')
     expect(runtime.env.TEXMFVAR).toBe(join(cache, 'texmf-var'))
     expect(runtime.env.TEXMFCACHE).toBe(cache)
+    const fonts = await readFile(runtime.env.FONTCONFIG_FILE!, 'utf8')
+    expect(fonts).toContain('<dir>C:/Windows/Fonts</dir>')
+    expect(fonts).not.toContain('Microsoft/Windows/Fonts')
     expect(runtime.compilerArgs).toEqual([])
     await manager.latexRuntime(signal, 'xelatex')
     const formats = scripted.calls.filter(call => call.args.includes('--byfmt'))
@@ -273,6 +297,123 @@ describe('TeX distribution selection', () => {
     expect(formats[1]?.command).toBe(join(bin, 'fmtutil-sys.exe'))
     expect(formats[1]?.args).toEqual(['--byfmt', 'xelatex'])
     expect(formats[1]?.env?.PATH?.startsWith(bin)).toBe(true)
+  })
+
+  it.each(['pdflatex', 'xelatex', 'lualatex'] as const)('copies the installed %s format and refreshes a changed format fingerprint', async (engine) => {
+    const root = await temporary()
+    const bin = join(root, 'latex', 'TinyTeX', 'bin', 'windows')
+    vi.stubEnv('DSH_HOME', join(root, 'data-home'))
+    vi.stubEnv('SystemRoot', 'C:\\Windows & system')
+    vi.stubEnv('LOCALAPPDATA', 'C:\\Users\\Research<user>')
+    const cache = join(root, 'data-home', 'research', 'cache', 'latex', hashBytes(bin).slice(0, 16), engine)
+    const installed = join(root, 'latex', 'TinyTeX', 'texmf-var', `${engine}.fmt`)
+    await write(join(bin, `${engine}.exe`), 'engine')
+    await write(installed, 'installed-format')
+    await write(join(root, 'latex', '.complete'))
+    const manager = new ComponentManager(root, none, windows(await temporary(), {}))
+    const runtime = await manager.latexRuntime(signal, engine)
+    const format = join(cache, 'texmf-var', 'web2c', engine === 'xelatex' ? 'xetex' : engine === 'lualatex' ? 'luahbtex' : 'pdftex', `${engine}.fmt`)
+    expect(await readFile(format, 'utf8')).toBe('installed-format')
+    expect(await readFile(runtime.env.FONTCONFIG_FILE!, 'utf8')).toContain('Research&lt;user&gt;')
+    await manager.latexRuntime(signal, engine)
+    await write(installed, 'updated-format')
+    await manager.latexRuntime(signal, engine)
+    expect(await readFile(format, 'utf8')).toBe('updated-format')
+    await rm(format)
+    await manager.latexRuntime(signal, engine)
+    expect(await readFile(format, 'utf8')).toBe('updated-format')
+    expect(scripted.calls.some(call => call.args.includes('--byfmt'))).toBe(false)
+  })
+
+  it('initializes a managed Unix format with host font directories and rejects a missing generated format', async () => {
+    const root = await temporary(), tex = join(root, 'latex', 'texlive'), bin = join(tex, 'bin', 'linux')
+    vi.stubEnv('DSH_HOME', join(root, 'home'))
+    await write(join(bin, 'pdflatex'))
+    await write(join(root, 'latex', '.complete'))
+    const manager = new ComponentManager(root, none, { ...windows(await temporary(), {}), platform: 'linux' })
+    await expect(manager.latexRuntime(signal, 'pdflatex')).rejects.toThrow('did not initialize pdflatex.fmt')
+    const initialize = scripted.calls.find(call => call.args.includes('--byfmt'))!
+    expect(initialize.command).toBe(join(bin, 'fmtutil-sys'))
+    expect(await readFile(initialize.env!.FONTCONFIG_FILE!, 'utf8')).toContain('/usr/share/fonts')
+    scripted.answer = async (command, args) => {
+      if (args.includes('--version')) return answer(command, args)
+      await write(join(initialize.env!.TEXMFVAR!, 'pdflatex.fmt'), 'format')
+      return { code: 0, stdout: '', stderr: '' }
+    }
+    expect((await manager.latexRuntime(signal, 'pdflatex')).bin).toBe(bin)
+  })
+
+  it.each(['pdfTeX 3.14', 'pdfTeX', '', '  \n'] as const)('reads an unlabelled compiler banner without assuming a distribution: %j', async (banner) => {
+    const bin = await temporary()
+    await write(join(bin, 'pdflatex.exe'))
+    scripted.answer = () => ({ code: 0, stdout: banner, stderr: '' })
+    const manager = new ComponentManager(await temporary(), () => ({ texBin: bin }), windows(bin, {}))
+    const status = (await manager.status()).find(item => item.id === 'latex')!
+    expect(status.installed).toBe(banner === 'pdfTeX 3.14')
+    expect(status.version).toBe(banner === 'pdfTeX 3.14' ? 'pdfTeX 3.14' : '')
+  })
+
+  it('reports an executable directory and an ENOTDIR candidate as unavailable', async () => {
+    const bin = await temporary()
+    await mkdir(join(bin, 'pdflatex.exe'))
+    const manager = new ComponentManager(await temporary(), () => ({ texBin: bin }), windows(bin, {}))
+    expect((await manager.status()).find(item => item.id === 'latex')).toMatchObject({ installed: false, problem: 'invalid-executable' })
+    const file = join(bin, 'not-a-directory')
+    await write(file)
+    const missing = new ComponentManager(await temporary(), () => ({ texBin: file }), windows(bin, {}))
+    expect((await missing.status()).find(item => item.id === 'latex')).toMatchObject({ installed: false, problem: 'missing-executable' })
+  })
+
+  it('retains an AbortError reported by a compiler probe even without a cancelled signal', async () => {
+    const bin = await temporary()
+    await write(join(bin, 'pdflatex.exe'))
+    const failure = Object.assign(new Error('Probe aborted'), { name: 'AbortError' })
+    scripted.answer = () => { throw failure }
+    const manager = new ComponentManager(await temporary(), () => ({ texBin: bin }), windows(bin, {}))
+    await expect(manager.latex(signal)).rejects.toBe(failure)
+  })
+
+  it('does not mark a downloaded but unusable TeX compiler as installed', async () => {
+    const root = await temporary(), bytes = archive({ 'TinyTeX/bin/windows/pdflatex.exe': 'bad image' })
+    serve({ 'https://downloads.test/latex.zip': bytes })
+    scripted.answer = () => ({ code: 0, stdout: 'Not TeX', stderr: '' })
+    const manager = new ComponentManager(root, none, windows(await temporary(), { latex: bytes }))
+    await expect(manager.latex(signal)).rejects.toThrow('no usable compiler')
+    expect(existsSync(join(root, 'latex/.complete'))).toBe(false)
+  })
+
+  it('treats an unreadable compiler as present but unusable', async () => {
+    const bin = await temporary()
+    await write(join(bin, 'pdflatex.exe'))
+    fileFaults.stat = join(bin, 'pdflatex.exe')
+    const manager = new ComponentManager(await temporary(), () => ({ texBin: bin }), windows(bin, {}))
+    expect((await manager.status()).find(item => item.id === 'latex')).toMatchObject({ installed: false, problem: 'invalid-executable' })
+  })
+
+  it('handles an absent PATH and ignores directories that hold no TeX executable', async () => {
+    const root = await temporary(), bin = await temporary()
+    const manager = new ComponentManager(root, none, windows(root, {}))
+    vi.stubEnv('PATH', undefined)
+    expect((await manager.status()).find(item => item.id === 'latex')?.installed).toBe(false)
+    vi.stubEnv('PATH', bin)
+    expect((await manager.status()).find(item => item.id === 'latex')?.installed).toBe(false)
+    expect(scripted.calls).toEqual([])
+  })
+
+  it('refuses package installation when selection changes away from the managed distribution', async () => {
+    const root = await temporary(), external = await temporary()
+    await write(join(root, 'latex/TinyTeX/bin/windows/pdflatex.exe'))
+    await write(join(root, 'latex/.complete'))
+    await write(join(external, 'pdflatex.exe'))
+    const preferences: ResearchPreferences = {}
+    let probes = 0
+    scripted.answer = (command, args) => {
+      if (args.includes('--version') && ++probes === 2) preferences.texBin = external
+      return answer(command, args)
+    }
+    const manager = new ComponentManager(root, () => preferences, windows(root, {}))
+    await expect(manager.installTexPackage('acmart.cls', signal)).rejects.toThrow('requires the selected managed distribution')
+    expect(scripted.calls.some(call => call.args.includes('install'))).toBe(false)
   })
 
   it('reports no TeX without probing arbitrary commands or downloading', async () => {
@@ -409,6 +550,20 @@ describe('TeX distribution selection', () => {
     if (usable) expect(result).toEqual({ value: bin })
     else expect('error' in result && result.error instanceof Error ? result.error.message : '').toMatch(/Configured TeX directory/)
     expect(fetch).toHaveBeenCalledTimes(1)
+  })
+
+  it('uses a newly configured compiler when the prior download fails', async () => {
+    const root = await temporary(), bin = await temporary()
+    await write(join(bin, 'pdflatex.exe'))
+    const preferences: ResearchPreferences = {}
+    const started = Promise.withResolvers<boolean>(), release = Promise.withResolvers<boolean>()
+    vi.stubGlobal('fetch', vi.fn(async () => { started.resolve(true); await release.promise; throw new Error('Download unavailable') }))
+    const manager = new ComponentManager(root, () => preferences, windows(await temporary(), {}))
+    const pending = manager.latex(signal)
+    await started.promise
+    preferences.texBin = bin
+    release.resolve(true)
+    expect(await pending).toBe(bin)
   })
 
   it('revalidates a replaced compiler and reports its actual installed version', async () => {
@@ -583,6 +738,30 @@ describe('compile completion', () => {
     expect(result.diagnostics).toContain(`Error: ${program === 'bibtex' ? 'BibTeX' : 'Biber'} failed (exit code 2)`)
     expect(result.diagnostics).toContain('Error: bibliography input unavailable')
     expect(await readFile(join(root, result.logPath), 'utf8')).toContain('Error: bibliography input unavailable')
+  })
+
+  it('does not replace a manuscript record when retaining its history fails', async () => {
+    const { project, artifact } = await fixture()
+    fileFaults.history = true
+    await expect(writeArtifact(project, { action: 'save-artifact', projectId: project.id, path: artifact.path,
+      content: 'Changed manuscript', kind: 'manuscript', evidence: [], claimIds: [], inputArtifacts: [] }, 'user', 10000))
+      .rejects.toThrow('History disk full')
+    expect(project.artifacts[0]?.revision).toBe(artifact.revision)
+  })
+
+  it('refuses to compile when an earlier PDF cannot be removed', async () => {
+    const { components, project, artifact } = await fixture()
+    fileFaults.pdf = true
+    await expect(compilePaper(project, artifact, 'pdflatex', components, signal, 10000)).rejects.toThrow('PDF busy')
+    expect(scripted.calls).toEqual([])
+  })
+
+  it('records a missing PDF after successful compiler processes', async () => {
+    const { root, components, project, artifact } = await fixture()
+    const result = await compilePaper(project, artifact, 'pdflatex', components, signal, 10000)
+    expect(result.status).toBe('failed')
+    expect(result.diagnostics.join('\n')).toContain('Could not read compiled PDF')
+    expect(await readFile(join(root, result.logPath), 'utf8')).toContain('ENOENT')
   })
 
   it.each(['', 'not a PDF', '%PDF-1.7'])('rejects empty or invalid PDF output despite successful processes: %j', async (content) => {

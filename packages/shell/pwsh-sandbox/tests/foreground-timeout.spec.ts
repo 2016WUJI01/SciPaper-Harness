@@ -10,13 +10,14 @@ import type { ShellRunResult } from '@deepseek-ai/dsh-shell'
 import { describe, expect, it, onTestFinished, vi } from 'vitest'
 import { SandboxPwshExecutor } from '../src/index.ts'
 
-async function setup() {
+async function setup(waitForRange = false) {
   vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
   const ctx = new Context()
   const prepared = Promise.withResolvers<ConfinedArgv>()
   const entered = Promise.withResolvers<AbortSignal | undefined>()
   const spawned = Promise.withResolvers<SubprocessSpawnSpec>()
   const completion = Promise.withResolvers<SubprocessOutcome>()
+  const rangeExited = Promise.withResolvers<boolean>()
   const runs: Promise<ShellRunResult>[] = []
   const listeners: Array<() => void> = []
   const wrap: ConfinedArgv = { argv: ['fixture-runner'], enforcement: 'full', denialSignatures: [], runnerFailureRules: [] }
@@ -29,15 +30,18 @@ async function setup() {
       return confine(argv, policy, signal)
     }
   }
-  const terminate = vi.fn(() => { completion.resolve({ exitCode: null, signal: 'SIGTERM' }) })
+  const abort = vi.fn(() => { completion.resolve({ exitCode: null, signal: 'SIGTERM' }) })
+  const terminate = vi.fn(abort.getMockImplementation())
+  const waitForExit = vi.fn(async () => { await completion.promise; return waitForRange ? rangeExited.promise : true })
   const output = { readFrom: () => ({ text: '', nextOffset: 0, lossy: false }) }
   const handle: SubprocessHandle = {
     stdin: undefined, stdout: undefined, stderr: undefined, control: undefined,
     collected: { stdout: output, stderr: output }, done: completion.promise,
-    terminate, waitForExit: async () => { await completion.promise; return true },
+    terminate, waitForExit,
   }
   onTestFinished(async () => {
     prepared.resolve(wrap)
+    rangeExited.resolve(true)
     completion.resolve({ exitCode: 0, signal: null })
     await Promise.allSettled(runs)
     for (const detach of listeners) detach()
@@ -51,9 +55,9 @@ async function setup() {
   await ctx.plugin(SandboxPwshExecutor, { timeoutMs: 100, graceMs: 100 })
   const spawn = vi.spyOn(ctx.subprocess, 'spawn').mockImplementation((spec) => {
     spawned.resolve(spec)
-    spec.signal?.addEventListener('abort', terminate, { once: true })
-    listeners.push(() => { spec.signal?.removeEventListener('abort', terminate) })
-    if (spec.signal?.aborted) terminate()
+    spec.signal?.addEventListener('abort', abort, { once: true })
+    listeners.push(() => { spec.signal?.removeEventListener('abort', abort) })
+    if (spec.signal?.aborted) abort()
     return handle
   })
   const start = (timeoutMs = 10, signal?: AbortSignal) => {
@@ -67,7 +71,7 @@ async function setup() {
     )
     return { promise, observed, execution }
   }
-  return { ctx, prepared, entered, spawned, completion, wrap, confine, spawn, terminate, start }
+  return { ctx, prepared, entered, spawned, completion, wrap, confine, spawn, abort, terminate, waitForExit, rangeExited, start }
 }
 
 describe('pwsh preparation deadline', () => {
@@ -93,8 +97,8 @@ describe('pwsh preparation deadline', () => {
     expect(vi.getTimerCount()).toBe(0)
   })
 
-  it('passes the remaining deadline to native execution instead of restarting it', async () => {
-    const test = await setup()
+  it('passes the remaining deadline to native execution and waits for the stopped process range', async () => {
+    const test = await setup(true)
     const run = test.start(100)
     const preparationSignal = await test.entered.promise
     await vi.advanceTimersByTimeAsync(60)
@@ -104,8 +108,12 @@ describe('pwsh preparation deadline', () => {
     await vi.advanceTimersByTimeAsync(39)
     expect(run.observed.done).toBe(false)
     await vi.advanceTimersByTimeAsync(1)
-    expect(run.observed.result).toMatchObject({ timedOut: true, aborted: false, signal: 'SIGTERM', sandbox: { enforcement: 'full' } })
+    expect(run.observed.done).toBe(false)
+    expect(test.abort).toHaveBeenCalledOnce()
     expect(test.terminate).toHaveBeenCalledOnce()
+    expect(test.waitForExit).toHaveBeenCalledOnce()
+    test.rangeExited.resolve(true)
+    await expect(run.promise).resolves.toMatchObject({ timedOut: true, aborted: false, signal: 'SIGTERM', sandbox: { enforcement: 'full' } })
     expect(vi.getTimerCount()).toBe(0)
   })
 

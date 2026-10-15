@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import { credentialRef, isCredentialKeySegment } from '../src/index.ts'
+import { credentialKey, credentialKeyId, credentialKeyScope, credentialRef, isCredentialKeySegment, parseCredentialKey } from '../src/index.ts'
 import type { CredentialRef } from '../src/index.ts'
 import { MemoryCredentials } from './memory.ts'
 
@@ -23,6 +23,16 @@ describe('credentialRef', () => {
     for (const invalid of ['', '9LEADING', 'WITH-DASH', 'WITH SPACE', 'ns:key']) {
       expect(() => credentialRef(invalid)).toThrow(TypeError)
     }
+  })
+})
+
+describe('credential record identity', () => {
+  it('recovers the owning scope and local id from a constructed or stored key', () => {
+    const key = credentialKey('search-provider', 'project-1')
+    expect(key).toBe('search-provider/project-1')
+    expect(credentialKeyScope(key)).toBe('search-provider')
+    expect(credentialKeyId(key)).toBe('project-1')
+    expect(credentialKeyId(parseCredentialKey(key))).toBe('project-1')
   })
 })
 

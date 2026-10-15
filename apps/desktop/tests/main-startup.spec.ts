@@ -1427,6 +1427,26 @@ describe('desktop main startup', () => {
     expect(harness.updateInstall).toHaveBeenCalledWith('1.0.1')
   })
 
+  it('does not install a downloaded update when quitting starts while its hidden-window prompt waits', async () => {
+    const host = await readyWorkspace()
+    const window = harness.windows[0]!
+    harness.updateState = { phase: 'available', version: '1.0.1' }
+    harness.updateDownload.mockImplementation(async () => { harness.updateState = { phase: 'ready', version: '1.0.1' }; return harness.updateState })
+    window.close()
+    window.visible = false
+    const opened = invoke(DESKTOP_IPC.updatesOpen, 'app') as Promise<void>
+    await vi.advanceTimersByTimeAsync(0)
+    expect(harness.updateDownload).toHaveBeenCalledWith('1.0.1')
+    harness.app.quit()
+    await host.stopping.promise
+    window.visible = true
+    window.emit('show')
+    await opened
+    expect(harness.updateInstall).not.toHaveBeenCalled()
+    host.exited.resolve()
+    await harness.quitCompleted.promise
+  })
+
   it('waits for Platform view storage cleanup before an ordinary quit completes', async () => {
     const host = await readyForUpdate()
     const disposal = harness.deferPlatformDispose()

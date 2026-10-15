@@ -13,6 +13,7 @@
     var(--dsh-composer-dock-inset) -
     var(--dsh-composer-dock-inset)
   );
+  max-width: calc(var(--dsh-composer-card-max-width) - 4 * var(--dsh-composer-dock-inset));
   margin: 0 auto;
 }
 
@@ -24,7 +25,6 @@
   align-items: center;
   gap: 10px;
   width: 100%;
-  max-width: calc(var(--dsh-composer-card-max-width) - 4 * var(--dsh-composer-dock-inset));
   height: 36px;
   margin: 0 auto;
   padding: 4px 5px 4px 12px;

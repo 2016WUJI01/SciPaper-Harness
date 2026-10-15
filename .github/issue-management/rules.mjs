@@ -247,9 +247,10 @@ export function isInvalidIssueLabel(label) {
 /**
  * Validate PR metadata and its referenced Issues.
  * @param {{authorType: string, labels: string[], references: ReturnType<typeof parseReferences>, issues: Map<number, {priority: string|null}>}} input PR snapshot.
+ * @param {{enforceProjectPriority?: boolean}} options Enforce resolving-Issue Priority in the Project repository.
  * @returns {string[]} Validation errors.
  */
-export function validatePullRequest(input) {
+export function validatePullRequest(input, { enforceProjectPriority = true } = {}) {
   if (!requiresPullRequestPolicy(input)) return []
   const errors = []
   const kinds = input.labels.filter((label) => PR_KINDS.has(label))
@@ -281,7 +282,7 @@ export function validatePullRequest(input) {
   const resolving = input.references.resolving
     .map((number) => [number, input.issues.get(number)])
     .filter((entry) => entry[1])
-  if (resolving.length === 0) return errors
+  if (resolving.length === 0 || !enforceProjectPriority) return errors
 
   const issuePriorities = resolving
     .map(([, issue]) => issue.priority?.toLowerCase())

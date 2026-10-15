@@ -28,6 +28,10 @@
 
 运行器选择不改变 PR 事件、按 PR 取消、不可变安装、只恢复的依赖缓存、完整工作区构建、预览打包、sourcemap 删除，以及复制到部署根目录的预览页面。Cloudflare 仅将构建站点上传至 PR 分支别名。受保护镜像检查要求 HTTP 200、无传输内容编码及 gzip 魔数字节；URL 评论保持幂等。Dependabot 与其他 PR 作者仍使用 GitHub 托管机器。
 
+每次成功的预览构建都会校验本地 gzip 镜像，并在可选部署之前，将 `apps/web/dist` 保留为可从工作流下载的 `pr-preview-<number>` 产物。仅保留产物的运行明确说明未执行部署与受保护镜像校验，也不发布预览 URL。构建、打包、镜像校验或产物上传失败仍会使作业失败。
+
+部署要求 PR 来自同一仓库、作者与触发者均不是 Dependabot，且已配置 Cloudflare Pages 项目和全部四项 Secret：`CLOUDFLARE_API_TOKEN`、`CLOUDFLARE_ACCOUNT_ID`、`CF_ACCESS_CLIENT_ID` 与 `CF_ACCESS_CLIENT_SECRET`。将仓库变量 `CF_PREVIEW_PROJECT` 设为受保护的 Pages 项目；仅 `deepseek-harness/deepseek-harness` 默认使用 `dsh-build-preview`。缺少该配置的派生仓库仅保留产物。符合条件的运行必须通过受保护镜像校验才能发布 URL；部署或校验失败仍会阻止作业通过。
+
 <a id="dev-note"></a>
 
 ## 开发备注

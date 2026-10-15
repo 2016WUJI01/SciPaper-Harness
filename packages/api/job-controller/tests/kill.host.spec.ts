@@ -4,7 +4,7 @@ import { unsupportedInbox } from '@deepseek-ai/dsh-agent-loop-testkit'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { JobId, JobOutcome } from '@deepseek-ai/dsh-jobs'
 import LocalJobRegistry from '@deepseek-ai/dsh-jobs-local'
-import SessionStore from '@deepseek-ai/dsh-session'
+import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
 import type { Session } from '@deepseek-ai/dsh-session'
 import { remoteErrorOf } from '@deepseek-ai/dsh-typert-protocol'
 import TypertRegistry from '@deepseek-ai/dsh-typert-registry'
@@ -158,6 +158,91 @@ describe('JobController.kill', () => {
 })
 
 describe('JobController.stopAll', () => {
+  it('confirms an empty cold Session without an Agent registry', async () => {
+    const ctx = new Context()
+    try {
+      await ctx.plugin(LocalJobRegistry)
+      await ctx.plugin(TypertRegistry)
+      await ctx.plugin(JobController)
+      await expect(ctx.jobController.stopAll({ sessionId: SessionId('cold') }, new AbortController().signal))
+        .resolves.toEqual({ confirmed: true, jobs: [], sources: [], agents: [] })
+    } finally { await ctx.fiber.dispose() }
+  })
+
+  it('rescans a child registered while its parent reaches idle without cancelling the idle parent twice', async () => {
+    const { ctx, session, agent, controller } = await harness()
+    let child: Agent | undefined
+    const rootCancel = vi.spyOn(agent, 'cancel')
+    const childCancel = vi.fn()
+    agent.whenIdle = async () => {
+      child ??= await registerAgent(ctx, ctx.sessions.create(), agent)
+      child.cancel = childCancel
+    }
+    try {
+      const report = await controller.stopAll({ sessionId: session.id }, new AbortController().signal)
+      expect(report).toMatchObject({ confirmed: true, agents: [{ sessionId: agent.id }, { sessionId: child!.id }] })
+      expect(rootCancel).toHaveBeenCalledTimes(1)
+      expect(childCancel).toHaveBeenCalledTimes(1)
+    } finally { await ctx.fiber.dispose() }
+  })
+
+  it.each([new Error('caller left'), 'caller left'])('contains cancellation while Agent observation starts: %s', async (reason) => {
+    const { ctx, session, agent, controller } = await harness()
+    const signal = new AbortController()
+    const cancel = vi.spyOn(agent, 'cancel')
+    agent.whenIdle = () => {
+      signal.abort(reason)
+      return new Promise(() => {})
+    }
+    try {
+      await expect(controller.stopAll({ sessionId: session.id }, signal.signal)).resolves.toMatchObject({
+        confirmed: false, agents: [{ sessionId: agent.id, error: 'Error: caller left' }],
+      })
+      expect(cancel).toHaveBeenCalledTimes(1)
+    } finally { await ctx.fiber.dispose() }
+  })
+
+  it('issues a final zero-budget stop for descendants admitted after the deadline', async () => {
+    const { ctx, session, agent, controller } = await harness({ stopWaitTimeoutMs: 1 })
+    const task = producer('late descendant work')
+    let child: Agent | undefined
+    let grandchild: Agent | undefined
+    const grandchildCancel = vi.fn()
+    let jobId: JobId | undefined
+    vi.useFakeTimers()
+    try {
+      agent.whenIdle = async () => {
+        if (child !== undefined) return
+        vi.setSystemTime(Date.now() + 2)
+        child = await registerAgent(ctx, ctx.sessions.create(), agent)
+        child.whenIdle = async () => {
+          if (grandchild !== undefined) return
+          grandchild = await registerAgent(ctx, ctx.sessions.create(), child)
+          grandchild.cancel = grandchildCancel
+          jobId = ctx.jobs.start({ ...task.spec, owner: grandchild.id })
+        }
+      }
+      const report = await controller.stopAll({ sessionId: session.id }, new AbortController().signal)
+      expect(report).toMatchObject({ confirmed: false, jobs: [{ job: { id: jobId, status: 'stopping' } }] })
+      expect(grandchildCancel).toHaveBeenCalledWith({ kind: 'user' }, { keepInbox: false })
+      expect(report.agents).toContainEqual({ sessionId: grandchild!.id, status: 'idle', error: 'session stop was not observed' })
+      expect([...task.cancels]).toEqual(Array(3).fill('cancelled by the user'))
+    } finally {
+      if (jobId !== undefined) task.settle({ status: 'killed' })
+      try { await ctx.fiber.dispose() } finally { vi.useRealTimers() }
+    }
+  })
+
+  it('contains a synchronous Agent observer failure without claiming the Session stopped', async () => {
+    const { ctx, session, agent, controller } = await harness()
+    agent.whenIdle = () => { throw new Error('observer failed') }
+    try {
+      await expect(controller.stopAll({ sessionId: session.id }, new AbortController().signal)).resolves.toMatchObject({
+        confirmed: false, agents: [{ sessionId: agent.id, error: 'Error: observer failed' }],
+      })
+    } finally { await ctx.fiber.dispose() }
+  })
+
   it('stops independent work admitted before Agent quiescence and preserves adapter failures', async () => {
     const { ctx, session, agent, controller } = await harness()
     let admitted = false

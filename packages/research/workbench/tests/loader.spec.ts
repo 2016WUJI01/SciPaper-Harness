@@ -20,14 +20,20 @@ import { existsSync } from 'node:fs'
 import { mkdir, mkdtemp, readdir, readFile, realpath, rm, symlink, unlink, writeFile } from 'node:fs/promises'
 import { homedir, tmpdir } from 'node:os'
 import { basename, dirname, join, parse, toNamespacedPath } from 'node:path'
-import { SESSION_FORMAT_VERSION, Session, SessionId } from '@deepseek-ai/dsh-session'
+import { SESSION_FORMAT_VERSION, Session, SessionId, SessionLogOffset } from '@deepseek-ai/dsh-session'
 import type { SessionEvent, SessionHeader } from '@deepseek-ai/dsh-session'
+import { RemoteError } from '@deepseek-ai/dsh-typert-protocol'
+import type { SessionStopSource } from '@deepseek-ai/dsh-jobs'
 import type { SessionCreateRequest } from '@deepseek-ai/dsh-api-session-controller/types'
+import type {} from '@deepseek-ai/dsh-api-session-controller'
+import type {} from '@deepseek-ai/dsh-workspace'
+import type {} from '@deepseek-ai/dsh-permission-presets'
+import type {} from '@deepseek-ai/dsh-credentials'
 import type { WorkspaceId } from '@deepseek-ai/dsh-workspace/types'
-import type { Agent } from '@deepseek-ai/dsh-agent'
+import AgentRegistry, { type Agent } from '@deepseek-ai/dsh-agent'
 import type { GoalView } from '@deepseek-ai/dsh-goal'
 import type { ProcessOptions, ProcessResult } from '../src/process.ts'
-import type { ResearchProject } from '../src/types.ts'
+import type { ExperimentSpec, ResearchProject } from '../src/types.ts'
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 import { draftFolderName } from '../src/drafts.ts'
 import { RESEARCH_TOOL_MODULES, type ResearchToolModule } from '../src/tools.ts'
@@ -73,7 +79,11 @@ vi.mock('../src/process.ts', async (original) => {
         const engine = path.basename(command).startsWith('xe') ? 'XeTeX' : path.basename(command).startsWith('lua') ? 'LuaHBTeX' : 'pdfTeX'
         return ok(`${engine} (TeX Live 2026)`)
       }
-      if (args[0] === '-c' && joined.includes('importlib.metadata')) return ok(JSON.stringify({ executable: command, version: '3.12' }))
+      if (args[0] === '-c' && joined.includes('importlib.metadata')) {
+        await processes.holds.get('inspect')
+        options.signal?.throwIfAborted()
+        return ok(JSON.stringify({ executable: command, version: '3.12' }))
+      }
       if (args[0] === '-c') return ok('ready')
       if (joined.includes('experiment_runner.py')) {
         await processes.holds.get(String(args[1]))
@@ -182,12 +192,13 @@ afterEach(async () => {
 /** A registered folder as the research service sees it. */
 interface FakeWorkspace { id: WorkspaceId; title: string; setTitle(title: string): Promise<void> }
 /** A live session as the research service reads it: its id and header. */
-interface FakeSession { id: string; header: { cwd?: string; origin?: 'subagent' } }
+interface FakeSession { id: string; header: { cwd?: string; origin?: 'subagent'; execution?: SessionHeader['execution'] }; running?: boolean }
 /** A live agent as the research service reads it: its session. */
 type FakeAgent = Agent
 
 interface Harness {
   service: InstanceType<typeof ResearchWorkbench>
+  stops: Map<string, SessionStopSource>
   registry: Map<string, unknown>
   prompts: unknown[]
   sessions: string[]
@@ -258,6 +269,7 @@ async function boot(pool: MemoryMediaPool, options: BootOptions = {}): Promise<H
   const credentials = new Map<string, string>()
   const workspaces = new Map<WorkspaceId, FakeWorkspace>()
   const agents: FakeAgent[] = []
+  const stops = new Map<string, SessionStopSource>()
   const goals = new Map<string, GoalView | Error>()
   const live: FakeSession[] = [...options.live ?? []]
   const attachedExamples = new Map<string, Session>()
@@ -306,11 +318,14 @@ async function boot(pool: MemoryMediaPool, options: BootOptions = {}): Promise<H
         },
         get archivedSessionIds() { return [...archived] },
       } as unknown as Context['workspaceRegistry'])
-      const agentRegistry = {
-        list: () => agents,
-        get: id => agents.find(agent => agent.id === id),
-      } satisfies Pick<Context['agents'], 'list' | 'get'>
-      c.provide('agents', agentRegistry as Context['agents'])
+      const agentRegistry = new AgentRegistry(c)
+      vi.spyOn(agentRegistry, 'list').mockImplementation(() => agents)
+      vi.spyOn(agentRegistry, 'get').mockImplementation(id => agents.find(agent => agent.id === id))
+      vi.spyOn(agentRegistry, 'isOwnedBy').mockReturnValue(false)
+      c.provide('jobs', { registerStopSource: (name: string, source: SessionStopSource) => {
+        stops.set(name, source)
+        return () => { stops.delete(name) }
+      } } as Context['jobs'])
       c.provide('goals', {
         get: (agent: FakeAgent) => {
           const goal = goals.get(agent.session.id)
@@ -337,7 +352,7 @@ async function boot(pool: MemoryMediaPool, options: BootOptions = {}): Promise<H
           applied.set(session.id, name)
         },
       } as unknown as Context['permissionPresets'])
-      c.provide('sessionController', {
+      const sessionController = {
         create: async (request: SessionCreateRequest) => {
           const { workspaceId, agentPreset, sessionId } = request
           const cwd = workspaceId?.slice('workspace:'.length) ?? request.cwd ?? root!
@@ -369,21 +384,33 @@ async function boot(pool: MemoryMediaPool, options: BootOptions = {}): Promise<H
         inspect: async (id: string) => {
           const session = attachedExamples.get(id)
           if (session === undefined) throw new Error(`No fixture Session: ${id}`)
-          return { meta: session.header, events: exampleEvents(session) }
+          return { meta: session.header, inheritedEventCount: session.inheritedEventCount, events: exampleEvents(session) }
         },
-        selectModel: async () => {},
-        prompt: async (request: unknown) => { prompts.push(request) },
+        fork: async (request) => {
+          const id = `session-${sessions.length + 1}`
+          sessions.push(id)
+          open({ id, header: { cwd: request.workspaceId?.slice('workspace:'.length) ?? root! } })
+          turns.add(id)
+          return { sessionId: SessionId(id) }
+        },
+        selectModel: async ({ provider, model, reasoningEffort }) => ({
+          selected: { provider, model, ...reasoningEffort === undefined ? {} : { reasoningEffort } },
+        }),
+        prompt: async (request) => { prompts.push(request); return { accepted: true } },
         list: async () => {
           if (listing.failure) throw listing.failure
           return {
             items: live.map(session => ({
-              sessionId: session.id, updatedAt: 0, running: false, blank: !turns.has(session.id),
+              sessionId: SessionId(session.id), agentAvailable: agents.some(agent => agent.id === session.id),
+              updatedAt: 0, running: session.running ?? false, blank: !turns.has(session.id),
               ...(session.header.cwd === undefined ? {} : { cwd: session.header.cwd }),
               ...(session.header.origin === undefined ? {} : { origin: session.header.origin }),
+              ...(session.header.execution === undefined ? {} : { execution: session.header.execution }),
             })),
           }
         },
-      } as unknown as Context['sessionController'])
+      } satisfies Pick<Context['sessionController'], 'create' | 'inspect' | 'fork' | 'selectModel' | 'prompt' | 'list'>
+      c.provide('sessionController', sessionController)
       c.provide('credentials', {
         set: async (ref: string, value: string) => { credentials.set(ref, value) },
         resolve: async (ref: string) => credentials.has(ref) ? { value: credentials.get(ref) } : undefined,
@@ -413,7 +440,7 @@ async function boot(pool: MemoryMediaPool, options: BootOptions = {}): Promise<H
   await ctx.loader.await()
   return {
     service: ctx.research, registry: new Map(ctx.tools.schemas().map(tool => [tool.name, tool])),
-    prompts, sessions, sessionPresets, credentials, workspaces, agents, goals, applied,
+    prompts, sessions, sessionPresets, credentials, workspaces, agents, goals, applied, stops,
     open: (session) => { open(session) }, turns, archived, listing, archiving,
   }
 }
@@ -639,6 +666,7 @@ describe('the research service records; it never drives the agent', () => {
       await service.execute({ action: 'set-mode', projectId: project.id, mode }, signal, 'user')
       expect(ctx!.tools.schemas().map(tool => tool.name)).toContain('research_knowledge')
       expect(await skills()).toContain('research-knowledge')
+      expect((await ctx!.skills.get('research-knowledge', { cwd: project.root }))?.content).toContain('research_knowledge')
       const result = await service.execute({ action: 'novelty', projectId: project.id,
         claim: 'Compare sparse attention kernels', references: [{ title: 'Attention', text: 'Sparse attention kernels' }],
         path: `novelty-${mode}.json` }, signal, 'agent')
@@ -2951,4 +2979,400 @@ describe('the experiment board is laid out by the agent and read by scripts', ()
     }
     expect((await service.execute({ projectId: q.id, action: 'board-view' }, signal, 'user')).board?.collected.q).toBeDefined()
   })
+})
+
+/** A live runtime with an inspectable, empty message queue. */
+function liveAgent(id: string, cwd: string, execution?: SessionHeader['execution']): Agent {
+  const rejectMutation = (): never => { throw new Error('This runtime fixture only reads its Inbox') }
+  const inbox: Agent['inbox'] = {
+    nextTurn: [], nextStep: [], clear: rejectMutation, append: rejectMutation, prepend: rejectMutation,
+    replace: rejectMutation, remove: rejectMutation, splice: rejectMutation,
+  }
+  const sessionId = SessionId(id)
+  return {
+    id: sessionId, ctx: ctx!, options: {}, status: 'idle',
+    session: Session.create(sessionId, [], { version: SESSION_FORMAT_VERSION, id: sessionId, cwd, createdAt: 1, isSeeded: false,
+      ...(execution === undefined ? {} : { execution }) }),
+    get inbox() { return inbox },
+    send() {}, followup() {}, steer() {}, inject() {}, cancel() {},
+    runMaintenance: work => work(signal), whenIdle: () => Promise.resolve(),
+  }
+}
+
+describe('conversation membership and project creation through the Loader', () => {
+  it('joins blank and recorded ordinary conversations and keeps their source archived', async () => {
+    root = await temporaryRoot('research-join-history-')
+    const { service, open, turns, archived } = await boot(new MemoryMediaPool())
+    const project = await service.create({ title: 'Destination', root: join(root, 'destination'), brief: '' })
+    const execute = (sessionId: string) => service.execute({ action: 'join-project', projectId: project.id, sessionId }, signal, 'user')
+    open({ id: 'blank', header: { cwd: join(root, 'ordinary') } })
+    expect(await execute('blank')).toMatchObject({ message: 'Conversation added to project', sessionId: project.sessionId })
+    expect(archived).toContain('blank')
+    const source = liveAgent('recorded', join(root, 'recorded')).session
+    const event = source.append('turn/start', { turn: 1 })
+    const inspect = vi.spyOn(ctx!.sessionController, 'inspect')
+      .mockResolvedValue({ meta: source.header, events: [event], inheritedEventCount: SessionLogOffset(0) })
+    const fork = vi.spyOn(ctx!.sessionController, 'fork')
+    try {
+      for (const [id, events] of [['recorded', [event]], ['empty-recorded', []]] as const) {
+        open({ id, header: { cwd: join(root, id) } }); turns.add(id)
+        inspect.mockResolvedValue({ meta: source.header, events: [...events], inheritedEventCount: SessionLogOffset(0) })
+        const joined = await execute(id)
+        expect(joined.sessionId).not.toBe(project.sessionId)
+        expect(fork).toHaveBeenLastCalledWith({ sessionId: id, workspaceId: project.workspaceId,
+          ...(events.length === 0 ? {} : { atSeq: event.seq }) })
+        expect(archived).toContain(id)
+      }
+    } finally { inspect.mockRestore(); fork.mockRestore() }
+  })
+
+  it('checks conversation ownership, activity and pending messages before any join', async () => {
+    root = await temporaryRoot('research-join-admission-')
+    const { service, open, archived, agents, goals } = await boot(new MemoryMediaPool())
+    const project = await service.create({ title: 'Destination', root: join(root, 'destination'), brief: '' })
+    const joinConversation = (sessionId: string) => service.execute({ action: 'join-project', projectId: project.id, sessionId }, signal, 'user')
+    for (const [id, session] of [
+      ['child', { id: 'child', header: { cwd: root, origin: 'subagent' as const } }],
+      ['ssh', { id: 'ssh', header: { cwd: '/remote', execution: { kind: 'ssh' as const, host: 'gpu' } } }],
+      ['archived', { id: 'archived', header: { cwd: root } }],
+      ['running', { id: 'running', header: { cwd: root }, running: true }],
+    ] as const) { open(session); if (id === 'archived') archived.push(id) }
+    for (const id of ['missing', 'child', 'ssh', 'archived']) await expect(joinConversation(id)).rejects.toThrow(/cannot join/)
+    await expect(joinConversation(project.sessionId!)).rejects.toThrow(/already belongs/)
+    await expect(joinConversation('running')).rejects.toThrow(/Stop this conversation/)
+    const owner = liveAgent('active-goal', root); agents.push(owner); open({ id: owner.id, header: { cwd: root } })
+    const goal: GoalView = { id: 'active' as GoalView['id'], revision: 1, objective: 'Finish research', phase: 'active',
+      maxGoalRounds: 10, roundsStarted: 0, createdAt: 1, updatedAt: 1, activation: 'armed' }
+    goals.set(owner.id, goal)
+    await expect(joinConversation(owner.id)).rejects.toThrow(/Stop this conversation/)
+    goals.set(owner.id, { ...goal, phase: 'paused' })
+    for (const key of ['nextTurn', 'nextStep'] as const) {
+      const current = owner.inbox
+      const queue = vi.spyOn(owner, 'inbox', 'get')
+      queue.mockReturnValue({ ...current, [key]: [{}] })
+      try { await expect(joinConversation(owner.id)).rejects.toThrow(/queued messages/) } finally { queue.mockRestore() }
+    }
+    goals.delete(owner.id)
+    expect(await joinConversation(owner.id)).toMatchObject({ sessionId: project.sessionId })
+  })
+
+  it('restores existing destinations and joins conversations during explicit project creation', async () => {
+    root = await temporaryRoot('research-create-join-')
+    const { service, open, archived } = await boot(new MemoryMediaPool())
+    const project = await service.create({ title: 'Destination', root: join(root, 'destination'), brief: '' })
+    const create = (path: string, sessionId?: string) => service.execute({ action: 'create-project', title: 'Named', root: path,
+      confirmNonEmpty: true, ...(sessionId === undefined ? {} : { sessionId }) }, signal, 'user')
+    await expect(create('relative')).rejects.toThrow(/absolute project folder/)
+    await expect(create(join(resolveDshHome(), 'research/examples/v1/other'))).rejects.toThrow(/read-only/)
+    await service.execute({ action: 'archive-project', projectId: project.id }, signal, 'user')
+    open({ id: 'rejected', header: { cwd: root } })
+    await expect(service.execute({ action: 'join-project', projectId: project.id, sessionId: 'rejected' }, signal, 'user')).rejects.toThrow(/Restore this project/)
+    expect((await create(project.root, 'rejected')).project?.archivedAt).toBeUndefined()
+    expect(archived).toContain('rejected')
+    open({ id: 'new-destination', header: { cwd: root } })
+    expect(await create(join(root, 'new'), 'new-destination')).toMatchObject({ project: { title: 'Named' } })
+    expect(archived).toContain('new-destination')
+    const example = (await service.snapshot()).projects.find(item => item.example)!
+    await expect(service.execute({ action: 'join-project', projectId: example.id, sessionId: 'unused' }, signal, 'user')).rejects.toThrow(/read-only/)
+  })
+
+  it('opens a new blank only for a held writer and propagates unrelated creation failures', async () => {
+    root = await temporaryRoot('research-held-blank-')
+    const { service } = await boot(new MemoryMediaPool())
+    const command = () => service.execute({ action: 'start-conversation', ordinary: true }, signal, 'user')
+    const create = vi.spyOn(ctx!.sessionController, 'create')
+    try {
+      const noSession = new RemoteError('session/writer-held', 'writer held', { sessionId: SessionId('uncreated') })
+      create.mockRejectedValueOnce(noSession)
+      await expect(command()).rejects.toBe(noSession)
+      const first = await command()
+      create.mockRejectedValueOnce(new Error('storage unavailable'))
+      await expect(command()).rejects.toThrow('storage unavailable')
+      const unrelated = new RemoteError('session/not-found', 'missing', { sessionId: SessionId(first.sessionId!) })
+      create.mockRejectedValueOnce(unrelated)
+      await expect(command()).rejects.toBe(unrelated)
+      create.mockRejectedValueOnce(new RemoteError('session/writer-held', 'writer held', { sessionId: SessionId(first.sessionId!) }))
+      const replacement = await command()
+      expect(replacement.sessionId).not.toBe(first.sessionId)
+      expect(create.mock.calls.at(-1)?.[0]).not.toHaveProperty('sessionId')
+    } finally { create.mockRestore() }
+  })
+
+  it('refuses a newly configured draft location that became a project after configuration', async () => {
+    root = await temporaryRoot('research-draft-root-race-')
+    const home = join(root, 'studies')
+    const { service } = await boot(new MemoryMediaPool(), { researchHome: home })
+    await service.create({ title: 'Now occupied', root: home, brief: '' })
+    await expect(service.execute({ action: 'start-new' }, signal, 'user')).rejects.toThrow(/research location lies inside/)
+  })
+
+  it('restores the earlier archive record when archiving an additional conversation fails', async () => {
+    root = await temporaryRoot('research-archive-existing-')
+    const { service, open, archiving } = await boot(new MemoryMediaPool())
+    const project = await service.create({ title: 'Research', root: join(root, 'project'), brief: '' })
+    const archive = () => service.execute({ action: 'archive-project', projectId: project.id }, signal, 'user')
+    await archive()
+    const previous = service.getProject(project.id)
+    open({ id: 'late', header: { cwd: project.root } }); archiving.failOn = 'late'
+    await expect(archive()).rejects.toThrow('Session became active')
+    expect(service.getProject(project.id)).toMatchObject({
+      archivedAt: previous.archivedAt, archivedConversations: previous.archivedConversations,
+    })
+  })
+
+  it('binds SSH conversations and goals only to their configured remote environment', async () => {
+    root = await temporaryRoot('research-ssh-membership-')
+    const { service, open, agents, goals, archived, applied } = await boot(new MemoryMediaPool())
+    await service.configure({ python: 'python' })
+    const project = await service.create({ title: 'Remote study', root: join(root, 'local'), brief: '' })
+    const other = await service.create({ title: 'Other study', root: join(root, 'other'), brief: '' })
+    await service.execute({ action: 'environment', projectId: project.id, environment: { name: 'gpu', kind: 'existing', target: 'ssh',
+      python: '/usr/bin/python3', sshHost: 'gpu', remoteRoot: '/work/project', requirements: [], isDefault: true } }, signal, 'agent')
+    const execution = { kind: 'ssh' as const, host: 'gpu' }
+    // SSH coordinates stay POSIX on every host; a sibling with the same prefix is outside this research.
+    for (const [id, cwd] of [['remote', '/work/project/code'], ['foreign', '/work/project-other/code']] as const) {
+      open({ id, header: { cwd, execution } })
+      const owner = liveAgent(id, cwd, execution); agents.push(owner)
+      goals.set(id, { id: `goal-${id}` as GoalView['id'], revision: 1, objective: id, phase: 'active', maxGoalRounds: 10,
+        roundsStarted: 1, createdAt: 1, updatedAt: 1, activation: 'armed' })
+    }
+    expect(applied.get('remote')).toBe('workspace-write')
+    expect(applied.has('foreign')).toBe(false)
+    expect(service.activeGoals(project).map(goal => goal.sessionId)).toEqual(['remote'])
+    expect(service.activeGoals(other)).toEqual([])
+    await service.execute({ action: 'archive-project', projectId: project.id }, signal, 'user')
+    expect(archived).toContain('remote'); expect(archived).not.toContain('foreign')
+  })
+})
+
+describe('the Loader preserves example identity and graph read-only boundaries', () => {
+  it('refuses a stored example identity registered to another root', async () => {
+    root = await temporaryRoot('research-example-identity-')
+    const pool = new MemoryMediaPool()
+    const first = await boot(pool)
+    const example = (await first.service.snapshot()).projects.find(project => project.example)!
+    await ctx!.fiber.dispose(); ctx = undefined
+    for (const medium of pool.media.values()) {
+      const table = medium.tables.get('projects')
+      const stored = table?.get(example.id) as ResearchProject | undefined
+      if (stored !== undefined) table!.set(example.id, { ...stored, root: join(root, 'unrelated') })
+    }
+    const second = await boot(pool)
+    await expect(second.service.snapshot()).rejects.toThrow(/Example identity already belongs to another root/)
+    expect(second.service.getProject(example.id).root).toBe(join(root, 'unrelated'))
+  })
+
+  it('refuses an example with no conversation identity instead of creating an unregistered session', async () => {
+    root = await temporaryRoot('research-example-no-session-')
+    const pool = new MemoryMediaPool()
+    const first = await boot(pool)
+    const example = (await first.service.snapshot()).projects.find(project => project.example)!
+    await ctx!.fiber.dispose(); ctx = undefined
+    for (const medium of pool.media.values()) {
+      const stored = medium.tables.get('projects')?.get(example.id) as ResearchProject | undefined
+      if (stored !== undefined) { const copy = { ...stored }; delete copy.sessionId; medium.tables.get('projects')!.set(example.id, copy) }
+    }
+    const second = await boot(pool)
+    await expect(second.service.snapshot()).rejects.toThrow(/Example has no registered conversation/)
+    expect(second.sessions).toEqual([])
+  })
+
+  it('refuses a controller that reports creation without attaching the example conversation', async () => {
+    root = await temporaryRoot('research-example-no-attachment-')
+    const { service } = await boot(new MemoryMediaPool())
+    const get = vi.spyOn(ctx!.sessions, 'get').mockReturnValue(undefined)
+    try { await expect(service.snapshot()).rejects.toThrow(/Example conversation was not attached/) } finally { get.mockRestore() }
+  })
+
+  it('keeps inline example text searchable, permits recall, and refuses graph commands that write examples', async () => {
+    root = await temporaryRoot('research-example-knowledge-')
+    const pool = new MemoryMediaPool()
+    const first = await boot(pool)
+    const example = (await first.service.snapshot()).projects.find(project => project.example && project.evidence.length)!
+    await ctx!.fiber.dispose(); ctx = undefined
+    for (const medium of pool.media.values()) {
+      const table = medium.tables.get('projects')
+      const stored = table?.get(example.id) as ResearchProject | undefined
+      if (stored !== undefined) table!.set(example.id, { ...stored, evidence: stored.evidence.map(evidence => ({ ...evidence,
+        chunks: [{ text: 'Retained inline sample text', locator: { line: 1 } }] })) })
+    }
+    const second = await boot(pool)
+    await second.service.snapshot()
+    const execute = (request: Record<string, unknown>) => second.service.execute({ projectId: example.id, ...request } as never, signal, 'agent')
+    expect((await execute({ action: 'search-evidence', query: 'Retained inline' })).content).toContain('Retained inline')
+    expect((await execute({ action: 'recall', query: 'sparse attention' })).message).toMatch(/pattern\(s\) recalled/)
+    for (const request of [{ action: 'recall', query: 'sparse attention', path: 'recall.json' },
+      { action: 'build-graph', papers: 'paper.json', domain: 'ai' }]) {
+      await expect(execute(request)).rejects.toThrow(/read-only/)
+    }
+  })
+
+  it('reports damaged marks and retains unnamed marks when their graphs cannot load', async () => {
+    root = await temporaryRoot('research-unavailable-graphs-')
+    const { service } = await boot(new MemoryMediaPool())
+    const project = await service.create({ title: 'Marks', root: join(root, 'project'), brief: '' })
+    const { ANNOTATIONS_FILE } = await import('../src/knowledge-annotations.ts')
+    await write(join(project.root, ANNOTATIONS_FILE), '{damaged')
+    const engine = await ctx!.researchKnowledge.run(signal, async engine => engine)
+    const graph = await engine.builtinGraph()
+    const target = { graph: 'ai' as const, kind: 'pattern' as const, id: graph.patterns[0]!.id }
+    const marked = await service.execute({ action: 'mark', projectId: project.id, target, verdict: 'pin' }, signal, 'agent')
+    expect(marked.message).toContain('not valid JSON')
+    const ai = vi.spyOn(engine, 'builtinGraph').mockRejectedValue(new Error('built-in asset unreadable'))
+    const local = vi.spyOn(engine, 'graphOf').mockRejectedValue(new Error('project graph unreadable'))
+    try {
+      const result = await service.execute({ action: 'marks', projectId: project.id }, signal, 'agent')
+      expect(result.marks).toHaveLength(1)
+      expect(result.marks?.[0]?.target).toEqual(target)
+    } finally { ai.mockRestore(); local.mockRestore() }
+    const mapView = vi.spyOn(ctx!.researchKnowledgeMap, 'view').mockResolvedValue({ built: false })
+    const overlay = vi.spyOn(ctx!.researchKnowledgeMap, 'overlay').mockResolvedValue({ built: false })
+    try {
+      for (const action of ['map-view', 'map-overlay'] as const) {
+        expect((await service.execute({ action, projectId: project.id }, signal, 'user')).message).toBe('The domain map is not built')
+      }
+    } finally { mapView.mockRestore(); overlay.mockRestore() }
+  })
+})
+
+/** A local experiment with no external runtime or model calls. */
+async function stoppableExperiment() {
+  root = await temporaryRoot('research-trusted-stop-')
+  const pool = new MemoryMediaPool()
+  const harness = await boot(pool)
+  const { service, agents, stops } = harness
+  await service.configure({ python: 'python' })
+  const project = await service.create({ title: 'Stops', root: join(root, 'project'), brief: '' })
+  await service.execute({ action: 'environment', projectId: project.id, environment: {
+    name: 'local', kind: 'existing', target: 'local', python: 'python', requirements: [], isDefault: true,
+  } }, signal, 'agent')
+  await write(join(project.root, 'code/train.py'), 'print(1)')
+  const spec: ExperimentSpec = { environmentId: service.getProject(project.id).environments[0]!.id, name: 'training',
+    argv: ['{python}', 'code/train.py'], cwd: '.', seed: 1, maxSeconds: 5, gpuIds: [], dataEvidenceIds: [], codeArtifactIds: [], metricsPath: 'metrics.json' }
+  const owner = liveAgent('stop-owner', project.root); agents.push(owner)
+  const requestId = '99999999-9999-4999-8999-999999999999'
+  const submit = async () => {
+    const response = await service.execute({ action: 'experiment', projectId: project.id, requestId, spec }, signal, 'agent', owner.id, owner)
+    // Stop tests own observations; the periodic poll must not settle their held supervisor first.
+    await change((project) => { project.experiments[0]!.nextObserveAt = Date.now() + 60000 })
+    return response
+  }
+  const stop = (deadline = Date.now() + 5000) => stops.get('research-experiments')!({ caller: owner, sessionId: owner.id, agents: [owner], deadline })
+  const change = (update: (project: ResearchProject) => void) => service['mutate'](project.id, update)
+  processes.runner = { status: 'running' }
+  return { ...harness, pool, project, owner, requestId, submit, stop, change }
+}
+
+describe('trusted experiment stop integration through the Loader', () => {
+  it('rejects mismatched callers before admitting commands and stops the verified runtime supervisor', async () => {
+    const { service, project, owner, submit, stop } = await stoppableExperiment()
+    const request = { action: 'search-evidence' as const, projectId: project.id, query: 'training' }
+    await expect(service.execute(request, signal, 'user', owner.id, owner)).rejects.toThrow(/not the registered runtime Agent/)
+    await expect(service.execute(request, signal, 'agent', owner.id, liveAgent(owner.id, project.root))).rejects.toThrow(/not the registered runtime Agent/)
+    await expect(service.execute(request, signal, 'agent', 'different-session', owner)).rejects.toThrow(/not the registered runtime Agent/)
+    expect((await submit()).runs?.[0]?.status).toBe('running')
+    processes.runner = { status: 'cancelled' }
+    expect(await stop()).toMatchObject({ confirmed: true, targets: [{ status: 'cancelled', confirmed: true }] })
+    expect(service.getProject(project.id).experiments[0]?.status).toBe('cancelled')
+  })
+
+  it('records cancellation if the producer is replaced between command validation and durable admission', async () => {
+    const { service, project, owner, submit } = await stoppableExperiment()
+    const get = vi.spyOn(ctx!.agents, 'get').mockReturnValueOnce(owner).mockReturnValue(undefined)
+    try {
+      expect(await submit()).toMatchObject({ runs: [{ status: 'cancelled' }], message: expect.stringContaining('Runtime submission admission ended') as string })
+      expect(service.getProject(project.id).experiments[0]?.status).toBe('cancelled')
+      expect(processes.calls.some(call => call.args[1] === 'launch')).toBe(false)
+    } finally { get.mockRestore() }
+  })
+
+  it('cancels preparation before any supervisor is submitted and waits for its cancelled ledger record', async () => {
+    const { service, project, submit, stop } = await stoppableExperiment()
+    const release = hold('inspect')
+    processes.calls.length = 0
+    const pending = submit()
+    try {
+      await vi.waitFor(() => { expect(processes.calls.some(call => call.args[0] === '-c')).toBe(true) })
+      const stopping = stop()
+      const options = processes.calls.find(call => call.args[0] === '-c')!.options as ProcessOptions
+      await vi.waitFor(() => { expect(options.signal?.aborted).toBe(true) })
+      release()
+      expect((await pending).runs?.[0]).toMatchObject({ status: 'cancelled', message: 'Cancelled before supervisor submission' })
+      expect(await stopping).toMatchObject({ confirmed: true, targets: [{ status: 'cancelled' }] })
+      expect(service.getProject(project.id).experiments[0]?.status).toBe('cancelled')
+      expect(processes.calls.some(call => call.args[1] === 'launch')).toBe(false)
+    } finally { release(); await pending }
+  })
+
+  it('requests cancellation after the deadline and logs a failed durable save without losing the active record', async () => {
+    const { service, project, pool, submit, stop } = await stoppableExperiment()
+    await submit()
+    processes.runner = { status: 'cancelled' }
+    pool.failNextWrites = 1
+    expect(await stop(Date.now() - 1)).toMatchObject({ confirmed: false, targets: [{ confirmed: false }] })
+    await vi.waitFor(() => { expect(logged('warn', 'research experiment stop request')).toBe(true) })
+    expect(service.getProject(project.id).experiments[0]?.status).toBe('running')
+    expect(await stop(Date.now() - 1)).toMatchObject({ confirmed: false })
+    await vi.waitFor(() => { expect(service.getProject(project.id).experiments[0]?.status).toBe('cancelled') })
+  })
+
+  it('keeps a terminal observation that wins while a stop request is in flight', async () => {
+    const { service, project, submit, stop, change } = await stoppableExperiment()
+    await submit()
+    processes.runner = { status: 'cancelled' }
+    const release = hold('cancel')
+    const stopping = stop()
+    try {
+      await vi.waitFor(() => { expect(processes.calls.some(call => call.args[1] === 'cancel')).toBe(true) })
+      await change((project) => { project.experiments[0]!.status = 'completed'; project.experiments[0]!.collected = true })
+      release()
+      expect(await stopping).toMatchObject({ confirmed: true })
+      expect(service.getProject(project.id).experiments[0]?.status).toBe('completed')
+    } finally { release(); await stopping }
+  })
+
+  it.each(['root', 'missing', 'directory', 'environment', 'spec'] as const)('refuses to save a late stop observation after the trusted %s changes', async (field) => {
+    const { service, project, submit, stop, change } = await stoppableExperiment()
+    await submit()
+    processes.runner = { status: 'cancelled' }
+    const release = hold('cancel')
+    const stopping = stop()
+    try {
+      await vi.waitFor(() => { expect(processes.calls.some(call => call.args[1] === 'cancel')).toBe(true) })
+      await change((current) => {
+        if (field === 'root') current.root = join(root!, 'replacement')
+        else if (field === 'missing') current.experiments = []
+        else if (field === 'directory') current.experiments[0]!.directory += '/replacement'
+        else if (field === 'environment') current.experiments[0]!.environmentFingerprint = 'replacement'
+        else current.experiments[0]!.spec.name = 'replacement'
+      })
+      release()
+      expect(await stopping).toMatchObject({ confirmed: false, targets: [{ error: expect.stringContaining('no longer matches its trusted submission') as string }] })
+      expect(service.getProject(project.id).experiments.every(run => run.status !== 'cancelled')).toBe(true)
+    } finally { release(); await stopping }
+  })
+})
+
+it('fails a queued knowledge job cleanly if its provider unloads before execution', async () => {
+  root = await temporaryRoot('research-knowledge-queued-disable-')
+  const { service } = await boot(new MemoryMediaPool())
+  const project = await service.create({ title: 'Queued recall', root: join(root, 'project'), brief: '' })
+  const tasks = service['domain'].table('tasks')
+  const put = tasks.put.bind(tasks)
+  const entered = Promise.withResolvers<undefined>(), released = Promise.withResolvers<undefined>()
+  const store = vi.spyOn(tasks, 'put').mockImplementationOnce(async (id, task) => {
+    expect(task).toMatchObject({ status: 'running' })
+    entered.resolve(undefined)
+    await released.promise
+    return put(id, task)
+  })
+  const pending = service.execute({ action: 'recall', projectId: project.id, query: 'attention' }, signal, 'user')
+  try {
+    await entered.promise
+    await [...ctx!.loader.entries()].find(entry => entry.options.id === 'knowledge-provider')!.update({ disabled: true }); await ctx!.loader.await()
+    released.resolve(undefined)
+    const started = await pending
+    await vi.waitFor(() => { expect(service.tasks().find(task => task.id === started.jobId)).toMatchObject({ status: 'failed',
+      message: expect.stringContaining('Knowledge graph plugin is disabled') as string }) })
+  } finally { released.resolve(undefined); store.mockRestore(); await pending }
 })

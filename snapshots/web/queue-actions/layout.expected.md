@@ -1,6 +1,7 @@
 - banner:
   - navigation "Session hierarchy": workspace
   - text: Standard mode
+  - button "Stop all"
   - button "More actions"
   - button "Open right sidebar"
   - tablist:

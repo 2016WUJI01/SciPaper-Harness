@@ -2,6 +2,7 @@ import { Context } from '@deepseek-ai/cordis'
 import AgentRegistry from '@deepseek-ai/dsh-agent'
 import type { Agent, AgentHandle, CreateAgentOptions } from '@deepseek-ai/dsh-agent'
 import type {} from '@deepseek-ai/dsh-agent-preset-registry'
+import { AttachmentId } from '@deepseek-ai/dsh-attachment'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
 import { RemoteError } from '@deepseek-ai/dsh-typert-protocol'
@@ -10,6 +11,7 @@ import { describe, expect, it, vi } from 'vitest'
 import {
   ApiSessionAgentController,
   ApiSessionCwdConflict,
+  ApiSessionExecutionConflict,
 } from '../src/agent.ts'
 import { SessionCommandController } from '../src/commands.ts'
 import { installModelSelectionProjection } from '../src/model-selection-projection.ts'
@@ -42,6 +44,35 @@ async function baseContext(): Promise<Context> {
 }
 
 describe('Session creation failures', () => {
+  it('routes a workspace-backed create to its SSH execution host', async () => {
+    const ctx = await baseContext()
+    try {
+      const workspace = { id: 'remote-workspace' as WorkspaceId, path: '/srv/study', location: { kind: 'ssh', host: 'lab', path: '/srv/study' }, attachSession: vi.fn(async () => {}) }
+      ctx.provide('workspaceRegistry', { get: () => workspace, list: () => [workspace] } as never)
+      const ensureSession = vi.fn(async (sessionId: SessionId, cwd: string) => {
+        const session = ctx.sessions.create(sessionId, { meta: { cwd, execution: { kind: 'ssh', host: 'lab' } } })
+        return { id: sessionId, session } as Agent
+      })
+      const controller = new SessionCommandController(ctx, controllerAgents({ ensureSession }), '/default')
+      const created = await controller.create({ workspaceId: workspace.id })
+      expect(ensureSession).toHaveBeenCalledWith(created.sessionId, '/srv/study', false, undefined, { kind: 'ssh', host: 'lab' })
+      expect(workspace.attachSession).toHaveBeenCalledWith(created.sessionId)
+    } finally { await ctx.fiber.dispose() }
+  })
+
+  it('surfaces a cold identity read failure before creating an Agent', async () => {
+    const ctx = await baseContext()
+    try {
+      vi.spyOn(ctx.sessionQuery, 'observeSession').mockRejectedValue(new Error('storage unavailable'))
+      const ensureSession = vi.fn()
+      const controller = new SessionCommandController(ctx, controllerAgents({ ensureSession }), '/default')
+      const rejected = controller.create({ sessionId: SessionId('unreadable') })
+      await expect(rejected).rejects.toMatchObject({ code: 'gateway/internal' })
+      await expect(rejected).rejects.toThrow('storage unavailable')
+      expect(ensureSession).not.toHaveBeenCalled()
+    } finally { await ctx.fiber.dispose() }
+  })
+
   it('mints an identity with the default cwd when no explicit target is supplied', async () => {
     const ctx = await baseContext()
     ctx.provide('workspaceRegistry', { get: () => undefined, list: () => [] } as never)
@@ -105,6 +136,7 @@ describe('Session creation failures', () => {
   })
 
   it.each([
+    { error: new ApiSessionExecutionConflict(SessionId('remote-conflict')), code: 'session/execution-conflict' },
     {
       error: new RemoteError(
         'agent-preset/invalid',
@@ -182,6 +214,59 @@ function resolvedHandle(ctx: Context, sessionId: SessionId): AgentHandle {
 }
 
 describe('Session fork failures', () => {
+  it.each([undefined, ['image'], ['text']])('validates image revisions against default model modalities %j', async (inputModalities) => {
+    const ctx = await baseContext()
+    try {
+      const source = ctx.sessions.create(SessionId('image-revision'))
+      const user = source.append('user/message', createUserMessage({
+        content: [{ type: 'image', attachment: { attachmentId: AttachmentId('figure'), bytes: 1, width: 1, height: 1, mediaType: 'image/png' } }],
+        source: { kind: 'user' },
+      }), { surfaceOp: 'append' })
+      ctx.provide('workspaceRegistry', { list: () => [] } as never)
+      ctx.provide('llm', {
+        listProviders: () => [{ id: 'fixture' }], listModels: async () => [{ id: 'fixture-model' }],
+        resolveCallConfig: async (selection: object) => selection,
+        resolveModelInfo: async () => ({ inputModalities }),
+      } as never)
+      const followup = vi.fn()
+      const selectForNextRequest = vi.fn()
+      const create = vi.spyOn(ctx.agents, 'create').mockImplementation(async (options) => {
+        const session = ctx.sessions.create(options.sessionId, {
+          meta: options.meta ?? {}, seed: [...options.seed ?? []],
+          ...(options.inheritedEventCount === undefined ? {} : { inheritedEventCount: options.inheritedEventCount }),
+        })
+        const handle = resolvedHandle(ctx, session.id)
+        Object.assign(handle.agent, { session, followup })
+        return handle
+      })
+      const controller = new SessionCommandController(ctx, controllerAgents({ selectForNextRequest }), '/default')
+      const operation = controller.fork({ sessionId: source.id, revision: { messageSeq: user.seq } })
+      if (inputModalities?.includes('image') === false) {
+        await expect(operation).rejects.toMatchObject({ code: 'session/attachment-invalid', details: { reason: 'MODEL_DOES_NOT_SUPPORT_IMAGES' } })
+        expect(create).not.toHaveBeenCalled()
+      } else {
+        expect((await operation).sessionId).toMatch(/^session-/)
+        expect(selectForNextRequest).toHaveBeenCalledWith(expect.anything(), { provider: 'fixture', model: 'fixture-model' })
+        expect(followup).toHaveBeenCalledWith(expect.objectContaining({ content: user.data.content }))
+      }
+    } finally { await ctx.fiber.dispose() }
+  })
+
+  it.each(['missing', 'remote'])('refuses a %s destination before creating a fork', async (destination) => {
+    const ctx = await baseContext()
+    try {
+      const source = completedSession(ctx, 'invalid-destination', '/source')
+      const workspace = destination === 'missing' ? undefined : { id: 'destination' as WorkspaceId, path: '/srv/study', location: { kind: 'ssh', host: 'lab', path: '/srv/study' } }
+      ctx.provide('workspaceRegistry', { get: () => workspace, list: () => [] } as never)
+      const create = vi.spyOn(ctx.agents, 'create')
+      const controller = new SessionCommandController(ctx, controllerAgents(), '/default')
+      const rejected = controller.fork({ sessionId: source.id, workspaceId: 'destination' as WorkspaceId })
+      await expect(rejected).rejects.toMatchObject({ code: 'gateway/internal' })
+      await expect(rejected).rejects.toThrow('existing local workspaces')
+      expect(create).not.toHaveBeenCalled()
+    } finally { await ctx.fiber.dispose() }
+  })
+
   it('revises a historical prompt with the current model and refuses revisions while running or before admission', async () => {
     const ctx = await baseContext()
     try {
@@ -260,6 +345,23 @@ describe('Session fork failures', () => {
       })
       await expect(controller.fork({ sessionId: source.id, workspaceId: workspace.id })).rejects.toThrow('Destination is read-only')
       expect(create).not.toHaveBeenCalled()
+    } finally { await ctx.fiber.dispose() }
+  })
+
+  it('forks a historical stored header without execution metadata into the local Host', async () => {
+    const ctx = await baseContext()
+    try {
+      const source = completedSession(ctx, 'legacy-source', '/workspace')
+      using observed = await ctx.sessionQuery.observeSession(source.id)
+      const legacyHeader = { ...observed.header }
+      delete legacyHeader.execution
+      const legacy = { ...observed, header: legacyHeader, [Symbol.dispose]: () => {} }
+      vi.spyOn(ctx.sessionQuery, 'observeSession').mockResolvedValue(legacy)
+      ctx.provide('workspaceRegistry', { list: () => [] } as never)
+      const create = vi.spyOn(ctx.agents, 'create').mockImplementation(async options => resolvedHandle(ctx, options.sessionId))
+      const controller = new SessionCommandController(ctx, controllerAgents(), '/default')
+      await controller.fork({ sessionId: source.id })
+      expect(create.mock.calls[0]?.[0].meta?.execution).toEqual({ kind: 'local' })
     } finally { await ctx.fiber.dispose() }
   })
 

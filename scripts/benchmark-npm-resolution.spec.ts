@@ -62,6 +62,7 @@ describe('npm resolution benchmark', () => {
   it('combines installed metadata with current publishable workspace fields', () => {
     const root = mkdtempSync(join(tmpdir(), 'dsh-npm-registry-index-'))
     roots.push(root)
+    writeJson(root, 'pnpm-lock.yaml', {})
     writeJson(root, 'node_modules/.pnpm/external@2.0.0/node_modules/external/package.json', {
       name: 'external',
       version: '2.0.0',
@@ -87,6 +88,106 @@ describe('npm resolution benchmark', () => {
       version: '0.1.0',
       dependencies: { '@deepseek-ai/dsh-child': '^0.1.0', external: '^2.0.0' },
     })
+  })
+
+  it('resolves overridden exact dependencies without inventing installed versions', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'dsh-npm-overrides-'))
+    roots.push(root)
+    writeJson(root, 'pnpm-lock.yaml', {
+      overrides: { 'fflate@>=0.8.0 <0.8.3': '0.8.3' },
+    })
+    writeJson(root, 'node_modules/.pnpm/office@1.0.0/node_modules/office/package.json', {
+      name: 'office', version: '1.0.0', dependencies: { fflate: '0.8.2' },
+    })
+    writeJson(root, 'node_modules/.pnpm/fflate@0.8.3/node_modules/fflate/package.json', {
+      name: 'fflate', version: '0.8.3',
+    })
+    const index = buildRegistryIndex(root)
+    expect(index.get('office')?.get('1.0.0')?.dependencies).toEqual({ fflate: '0.8.2' })
+    expect([...index.get('fflate')?.keys() ?? []]).toEqual(['0.8.3'])
+    expect(index.overrides).toEqual({ 'fflate@>=0.8.0 <0.8.3': '0.8.3' })
+
+    const timeoutMs = process.platform === 'win32' ? 30_000 : 10_000
+    const result = await resolveNpmPackageLock(index, { office: '1.0.0' }, timeoutMs)
+    expect(result.packageLock.packages['node_modules/fflate']?.version).toBe('0.8.3')
+    expect(result.archiveRequests).toBe(0)
+    expect(result.unknownPackages).toEqual([])
+    await expect(resolveNpmPackageLock(new Map(index), { office: '1.0.0' }, timeoutMs))
+      .rejects.toThrow('No matching version found for fflate@0.8.2')
+  })
+
+  it('limits parent overrides to matching versions and direct edges', async () => {
+    const index: RegistryIndex = Object.assign(new Map([
+      ['office', new Map([
+        ['1.0.0', { name: 'office', version: '1.0.0', dependencies: { fflate: '0.8.2', bridge: '1.0.0' } }],
+        ['2.0.0', { name: 'office', version: '2.0.0', dependencies: { fflate: '0.8.2' } }],
+      ])],
+      ['bridge', new Map([['1.0.0', { name: 'bridge', version: '1.0.0', dependencies: { fflate: '0.8.2' } }]])],
+      ['fflate', new Map([
+        ['0.8.3', { name: 'fflate', version: '0.8.3' }],
+        ['0.8.4', { name: 'fflate', version: '0.8.4' }],
+      ])],
+    ]), { overrides: {
+      'fflate@>=0.8.0 <0.8.3': '0.8.4',
+      'office@>=1 <2>fflate@>=0.8.0 <0.8.3': '0.8.3',
+    } })
+    const result = await resolveNpmPackageLock(index, {
+      office: '1.0.0', next: 'npm:office@2.0.0',
+    }, process.platform === 'win32' ? 30_000 : 10_000)
+
+    expect(result.packageLock.packages['node_modules/office']?.dependencies?.fflate).toBe('0.8.3')
+    expect(result.packageLock.packages['node_modules/next']?.dependencies?.fflate).toBe('0.8.4')
+    expect(result.packageLock.packages['node_modules/bridge']?.dependencies?.fflate).toBe('0.8.4')
+    expect(index.get('office')?.get('1.0.0')?.dependencies?.fflate).toBe('0.8.2')
+    expect(result.archiveRequests).toBe(0)
+  })
+
+  it('applies version overrides to optional and peer edges while preserving unrelated ranges', async () => {
+    const index: RegistryIndex = Object.assign(new Map([
+      ['adapter', new Map([['1.0.0', {
+        name: 'adapter', version: '1.0.0',
+        optionalDependencies: { optional: '1.0.0' },
+        peerDependencies: { peer: '1.0.0', other: '^2.0.0' },
+      }]])],
+      ['optional', new Map([['1.0.1', { name: 'optional', version: '1.0.1' }]])],
+      ['peer', new Map([['1.0.1', { name: 'peer', version: '1.0.1' }]])],
+      ['other', new Map([['2.0.0', { name: 'other', version: '2.0.0' }]])],
+    ]), { overrides: { 'optional@1.0.0': '1.0.1', 'peer@1.0.0': '1.0.1', 'other@^1.0.0': '1.0.1' } })
+    const result = await resolveNpmPackageLock(index, { adapter: '1.0.0' }, process.platform === 'win32' ? 30_000 : 10_000)
+    expect(result.packageLock.packages['node_modules/adapter']).toMatchObject({
+      optionalDependencies: { optional: '1.0.1' }, peerDependencies: { peer: '1.0.1', other: '^2.0.0' },
+    })
+    expect(result.packageLock.packages['node_modules/optional']?.version).toBe('1.0.1')
+    expect(result.packageLock.packages['node_modules/peer']?.version).toBe('1.0.1')
+    expect(result.packageLock.packages['node_modules/other']?.version).toBe('2.0.0')
+    expect(result.archiveRequests).toBe(0)
+  })
+
+  it('projects linked workspace overrides to their real published versions', () => {
+    const root = mkdtempSync(join(tmpdir(), 'dsh-npm-linked-overrides-'))
+    roots.push(root)
+    writeJson(root, 'pnpm-lock.yaml', { overrides: {
+      '@scope/runtime': 'link:vendor/runtime', alias: 'link:vendor/runtime', 'office>child': '2.0.0',
+    } })
+    writeJson(root, 'vendor/runtime/package.json', { name: '@scope/runtime', version: '3.0.0' })
+    const index = buildRegistryIndex(root)
+    expect(index.overrides).toEqual({
+      '@scope/runtime': '3.0.0', alias: 'npm:@scope/runtime@3.0.0', 'office>child': '2.0.0',
+    })
+    expect([...index.get('@scope/runtime')?.keys() ?? []]).toEqual(['3.0.0'])
+  })
+
+  it.each([
+    [null, 'expected a lockfile object'],
+    [{ overrides: [] }, 'overrides must be a selector-to-string mapping'],
+    [{ overrides: { child: 1 } }, 'override child must be a string'],
+    [{ overrides: { child: 'link:vendor/missing' } }, 'links to an unindexed workspace'],
+    [{ overrides: { child: '-' } }, 'cannot be represented by the local npm registry'],
+  ])('rejects an invalid installed override policy: %j', (lock, error) => {
+    const root = mkdtempSync(join(tmpdir(), 'dsh-npm-invalid-overrides-'))
+    roots.push(root)
+    writeJson(root, 'pnpm-lock.yaml', lock)
+    expect(() => buildRegistryIndex(root)).toThrow(error)
   })
 
   it('runs npm against the local registry without requesting an archive', async () => {

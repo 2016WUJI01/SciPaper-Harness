@@ -185,8 +185,12 @@ export class OfficeToPdf extends TypertRemoteService {
         throw new OfficeToPdfError('unsupported-format', 'The path must end in doc, docx, xls, xlsx, ppt, or pptx.')
       }
       const files = this.ctx.get('workspaceFiles')
-      const fs = this.ctx.get('fs')
-      if (files === undefined || (scope.execution?.kind !== 'ssh' && fs === undefined)) {
+      const localFs = this.ctx.get('fs')
+      // Retain the authorized execution mode and its required local provider across queued reads.
+      const access = scope.execution?.kind === 'ssh'
+        ? { kind: 'ssh' as const }
+        : localFs === undefined ? undefined : { kind: 'local' as const, fs: localFs }
+      if (files === undefined || access === undefined) {
         throw new OfficeToPdfError('unavailable', 'Office file rendering requires workspaceFiles and a local filesystem for local Sessions.')
       }
       const authorized = await files.readBytes(scope, path, { range: { offset: 0, length: 1 } }, signal)
@@ -202,7 +206,7 @@ export class OfficeToPdf extends TypertRemoteService {
         key: brandString<OfficeSourceKey>(JSON.stringify([scope.sessionId, scope.execution, scope.workspaceRoot, source.absolutePath])),
         version: source.version, ...(source.bytes === undefined ? {} : { bytes: source.bytes }),
         read: async (upstream, maxBytes) => {
-          if (scope.execution?.kind === 'ssh') {
+          if (access.kind === 'ssh') {
             const chunks: Uint8Array[] = []
             let offset = 0
             let chunkLimit = 1024 * 1024
@@ -245,7 +249,7 @@ export class OfficeToPdf extends TypertRemoteService {
             for (const chunk of chunks) { bytes.set(chunk, cursor); cursor += chunk.byteLength }
             return { bytes, version: source.version }
           }
-          if (fs === undefined) throw new OfficeToPdfError('unavailable', 'The local filesystem is unavailable.')
+          const fs = access.fs
           const target = await fs.resolve(source.absolutePath, { signal: upstream })
           const info = await fs.stat(target, upstream)
           if (info === undefined || info.type !== 'file') throw new OfficeToPdfError('source-changed', 'The source changed.')

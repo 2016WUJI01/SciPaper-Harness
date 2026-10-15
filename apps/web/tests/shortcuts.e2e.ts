@@ -330,7 +330,7 @@ describe('web e2e: shortcut reference', () => {
       await context.addInitScript((value) => { Object.defineProperty(navigator, 'platform', { value }) }, platform)
       const page = await context.newPage()
       await page.goto(scaffold.authenticatedUrl)
-      const newSession = page.getByRole('button', { name: 'New session', exact: true }).filter({ hasText: 'New Session' })
+      const newSession = page.getByRole('button', { name: 'New conversation', exact: true }).filter({ has: page.locator('kbd') })
       await newSession.waitFor()
       if (platform === 'MacIntel') await page.evaluate(() => { document.documentElement.dataset.platform = 'darwin' })
       await page.keyboard.press(`${primary}+/`)

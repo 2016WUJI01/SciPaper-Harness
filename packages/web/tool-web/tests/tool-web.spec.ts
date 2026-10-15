@@ -1018,3 +1018,23 @@ describe('scope-aware web guidance', () => {
 function withPersona(...sections: string[]): string {
   return ['You are an AI agent powered by DeepSeek Harness.', ...sections].join('\n\n')
 }
+
+
+describe('fetch pagination boundaries', () => {
+  it.each([-1, 0.5, Number.NaN, Number.POSITIVE_INFINITY])('rejects invalid offsets %s', (offset) => {
+    expect(() => parseFetchArgs({ url: 'https://page.test', offset })).toThrow('offset must be a non-negative integer')
+  })
+  it.each([0, -1, 0.5, Number.NaN])('rejects invalid page sizes %s', (max_chars) => {
+    expect(() => parseFetchArgs({ url: 'https://page.test', max_chars })).toThrow('max_chars must be a positive integer')
+  })
+  it('formats the last page without advertising another continuation', () => {
+    const page = { url: 'https://page.test', statusCode: 200, body: { kind: 'text' as const, content: 'tail' }, truncated: false, offset: 10, totalChars: 14 }
+    const result = formatFetchOutput(page, 10000)
+    expect(result).toContain('Characters 10–14 of 14.')
+    expect(result).not.toContain('Continue with web_fetch')
+    const continuedPage = { ...page, nextOffset: 14 }
+    const limitedPage = { ...page, sourceTruncated: true }
+    expect(formatFetchOutput(continuedPage, 10000)).toContain('offset=14.')
+    expect(formatFetchOutput(limitedPage, 10000)).toContain('Source reached the retrieval limit; later content requires a narrower URL.')
+  })
+})

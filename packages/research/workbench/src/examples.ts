@@ -147,9 +147,11 @@ export async function initializeResearchExamples(home: string, assets: string, r
         const source = await projectPath(join(assets, example.id), path)
         await installFile(root, path, await readFile(source))
       }
-      const existing = registration.find(root)
-      const project = existing ?? await exampleProject(example, root, await registration.workspace(root, example.title))
-      if (existing === undefined) await registration.put(project)
+      let project = registration.find(root)
+      if (project === undefined) {
+        project = await exampleProject(example, root, await registration.workspace(root, example.title))
+        await registration.put(project)
+      }
       await ensureEvidenceText(project)
       await registration.conversation(project, example.conversation)
     }

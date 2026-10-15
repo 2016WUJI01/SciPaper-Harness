@@ -27,9 +27,11 @@ export function patchAsarLibraryResolver(resolver: LibraryResolver): void {
   resolver.resolveLibPath = patched
 }
 
-/** Apply the FFI path correction before the generated SDK module is imported. */
-export function preparePackagedCuaImport(): void {
-  if (process.versions.electron === undefined || !/[\\/]app\.asar[\\/]/iu.test(import.meta.url)) return
+/** Apply the FFI path correction before the generated SDK module is imported.
+ * @param moduleUrl - trusted importing module URL, defaulting to this module's bundled location.
+ */
+export function preparePackagedCuaImport(moduleUrl: string = import.meta.url): void {
+  if (process.versions.electron === undefined || !/[\\/]app\.asar[\\/]/iu.test(moduleUrl)) return
   const sdkRequire = createRequire(import.meta.resolve('@trycua/cua-driver'))
   const resolver = sdkRequire('@ubjs/node/typescript/dist/resolve-lib.js') as LibraryResolver
   patchAsarLibraryResolver(resolver)

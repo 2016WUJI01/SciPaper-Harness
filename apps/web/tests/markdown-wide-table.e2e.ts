@@ -216,12 +216,15 @@ async function awaitTableLayout(target: Page): Promise<void> {
     if (element === null) return false
     const tracks = getComputedStyle(element).gridTemplateColumns.split(' ').map(Number.parseFloat)
     const root = element.querySelector<HTMLElement>('div[data-phase]')
-    // Mirrored from ui-layout's SIDEBAR_COLLAPSED; these tests use the Host compiler face.
-    return tracks[0] === 56 && tracks.at(-1) === 0
+    const content = root?.querySelector<HTMLElement>('[data-conversation-content]')
+    // Mobile navigation is a covering drawer; wider Web frames keep the icon rail.
+    const collapsedWidth = element.clientWidth <= 640 ? 0 : 56
+    return tracks[0] === collapsedWidth && tracks.at(-1) === 0
       && element.getAnimations().every(animation =>
         animation.playState === 'finished' || animation.playState === 'idle')
       && root !== null
-      && root.style.getPropertyValue('--dsh-conversation-column-width') === `${String(root.offsetWidth)}px`
+      && content !== null && content !== undefined
+      && root.style.getPropertyValue('--dsh-conversation-column-width') === `${String(content.offsetWidth)}px`
   }, undefined, { timeout: 10_000 })
 }
 

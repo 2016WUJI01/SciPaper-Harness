@@ -42,7 +42,8 @@ export async function extractPdfText(
   worker.stderr.resume()
   let termination: Promise<number> | undefined
   const terminate = (): Promise<number> => termination ??= worker.terminate()
-  let abort: (() => void) | undefined
+  // The Promise executor assigns this before any listener registration can throw.
+  let abort!: () => void
   let result: { content: string; truncated: boolean }
   try {
     result = await new Promise<{ content: string; truncated: boolean }>((resolve, reject) => {
@@ -71,7 +72,7 @@ export async function extractPdfText(
       if (signal.aborted) abort()
     })
   } finally {
-    if (abort !== undefined) signal.removeEventListener('abort', abort)
+    signal.removeEventListener('abort', abort)
     await terminate()
     worker.removeAllListeners()
   }

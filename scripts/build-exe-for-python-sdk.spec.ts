@@ -57,11 +57,17 @@ describe('Python runtime executable builder CLI', () => {
       '--targets=node24-macos-arm64',
     )
 
-    expect(result.status).toBe(0)
+    expect(result.status, result.stderr).toBe(0)
     expect(result.stdout).toContain(`${process.execPath.includes(' ') ? JSON.stringify(process.execPath) : process.execPath} C:\\tools\\pnpm.cjs run verify-runtime-closure`)
     expect(result.stdout).toContain(`${process.execPath.includes(' ') ? JSON.stringify(process.execPath) : process.execPath} C:\\tools\\pnpm.cjs --filter dsh-python-runtime-closure deploy`)
     const deploy = result.stdout.split('\n').find(line => line.includes(' --filter dsh-python-runtime-closure deploy'))
     expect(deploy).toContain('--prod --config.allow-unused-patches=true')
+    expect(deploy).toContain('--config.force-legacy-deploy=false')
+    expect(deploy).toContain('--config.inject-workspace-packages=true')
+    expect(deploy).toContain('--ignore-scripts')
+    expect(deploy).not.toContain('--legacy')
+    expect(deploy).not.toContain('--config.auto-install-peers=false')
+    expect(result.stdout).toContain('rebuild --pending')
     expect(result.stdout.split('--config.allow-unused-patches=true')).toHaveLength(2)
     expect(result.stdout).not.toContain(resolve(root, 'python/sdk-runtime/runtime-bootstrap.mjs'))
     expect(result.stdout).toContain('"bin":"runtime-bootstrap.mjs"')
@@ -85,7 +91,7 @@ describe('Python runtime executable builder CLI', () => {
       '--targets=node24-macos-arm64',
     )
 
-    expect(result.status).toBe(0)
+    expect(result.status, result.stderr).toBe(0)
     expect(result.stdout).toContain(`${process.execPath.includes(' ') ? JSON.stringify(process.execPath) : process.execPath} ${entrypoint} run verify-runtime-closure`)
     expect(result.stdout).not.toMatch(/pnpm\.cmd/i)
   })
@@ -98,12 +104,36 @@ describe('Python runtime executable builder CLI', () => {
       '--targets=node24-macos-x64',
     )
 
-    expect(result.status).toBe(0)
+    expect(result.status, result.stderr).toBe(0)
     expect(result.stdout).toContain('exec pkg')
-    expect(result.stdout).toContain('--sea --targets node24-macos-x64')
+    expect(result.stdout).toContain('--sea --compress GZip --targets node24-macos-x64')
     expect(result.stdout).toContain('prepare Python and Office skills for mac-x64')
     expect(result.stdout).toContain(join(root, 'dist-exe', 'macos-x64'))
   })
+
+  it.each([
+    'macos-arm64',
+    'macos-x64',
+    ...(process.platform === 'linux' ? [`linux-${process.arch}`] : []),
+    ...(process.platform === 'win32' ? ['win-x64'] : []),
+  ])(
+    'compresses the SEA archive before injecting the %s executable',
+    (target) => {
+      const result = run(
+        { npm_execpath: 'C:\\tools\\pnpm.cjs' },
+        '--skip-build',
+        '--dry-run',
+        `--targets=node24-${target}`,
+      )
+
+      expect(result.status, result.stderr).toBe(0)
+      const command = result.stdout.split('\n').find(line => line.includes(' exec pkg '))
+      expect(command).toContain(`--sea --compress GZip --targets node24-${target}`)
+      if (target === 'win-x64') {
+        expect(result.stdout).toContain('[dry-run] verify Windows node-pty addons in ')
+      }
+    },
+  )
 
   it('rejects a Windows arm64 product before any build step', () => {
     const result = run(

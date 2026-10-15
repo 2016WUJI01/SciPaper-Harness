@@ -3,7 +3,7 @@ import { EventEmitter } from 'node:events'
 import { createServer, request as httpRequest } from 'node:http'
 import { Readable } from 'node:stream'
 import { Context } from '@deepseek-ai/cordis'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, onTestFinished, vi } from 'vitest'
 import type { AddressInfo } from 'node:net'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { AttachmentStore } from '@deepseek-ai/dsh-attachment'
@@ -716,4 +716,52 @@ describe('connection node half over a real HTTP server', () => {
       await dispose()
     }
   })
+})
+
+it('rejects a remote index with the wrong browser origin and revokes active peers during service teardown', async () => {
+  const { connection, dispose } = await mounted()
+  onTestFinished(dispose)
+  const remote = connection.registerRemoteOrigin('https://research.example')
+  const invitation = remote.createPairingUrl()
+  remote.revokePairing(invitation.id)
+  const withdrawn = fakeResponse()
+  connection.authorizeIndex(fakeRequest({ host: 'research.example', origin: remote.origin }, new URL(invitation.url).search), withdrawn.response)
+  expect(withdrawn.state.status).toBe(401)
+  for (const headers of [
+    { host: 'research.example', origin: 'http://research.example' },
+    { host: 'research.example', origin: remote.origin, 'sec-fetch-site': 'cross-site' },
+  ]) {
+    const denied = fakeResponse()
+    expect(connection.authorizeIndex(fakeRequest(headers, '/'), denied.response)).toBe(false)
+    expect(denied.state.status).toBe(403)
+    expect(denied.state.body).toBe('forbidden')
+  }
+  const paired = fakeResponse()
+  connection.authorizeIndex(fakeRequest({ host: 'research.example', origin: remote.origin }, new URL(remote.createPairingUrl().url).search), paired.response)
+  const cookie = paired.state.headers?.['set-cookie']?.split(';', 1)[0] ?? ''
+  const admission = connection.admit({ headers: { host: 'research.example', origin: remote.origin, cookie } })
+  if ('rejection' in admission) throw new Error('remote pairing was not admitted')
+  const closed = vi.fn()
+  admission.peer.ctx.effect(() => closed, 'test: active remote peer shutdown')
+  await dispose()
+  expect(closed).toHaveBeenCalledOnce()
+  expect(() => remote.createPairingUrl()).toThrow('revoked')
+  await remote.dispose()
+  await remote.dispose()
+})
+
+it('withdraws a remote origin when its contributing plugin unloads while the Host remains available', async () => {
+  const { ctx, connection, dispose } = await mounted()
+  onTestFinished(dispose)
+  let remote: ReturnType<HostConnectionHandle['registerRemoteOrigin']> | undefined
+  const owner = ctx.plugin({ inject: ['connection'], apply(scope: Context) {
+    remote = scope.connection.registerRemoteOrigin('https://plugin.example')
+  } })
+  await owner.await()
+  if (remote === undefined) throw new Error('remote origin contribution did not activate')
+  const contributed = remote
+  expect(connection.requestRejection({ headers: { host: 'plugin.example' } })).toBe(401)
+  await owner.dispose()
+  expect(connection.requestRejection({ headers: { host: 'plugin.example' } })).toBe(403)
+  expect(() => contributed.createPairingUrl()).toThrow('revoked')
 })

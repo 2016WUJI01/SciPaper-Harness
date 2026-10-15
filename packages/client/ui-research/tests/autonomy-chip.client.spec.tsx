@@ -236,3 +236,11 @@ describe('the autonomy chip in the composer', () => {
     expect(choices()).toEqual([])
   })
 })
+
+it('waits for an ordinary conversation permission projection before drawing the chip', () => {
+  const w = world([])
+  w.preset = undefined
+  const { chip } = mount(w)
+  expect(chip.container.innerHTML).toBe('')
+  expect(w.commands).toEqual([])
+})

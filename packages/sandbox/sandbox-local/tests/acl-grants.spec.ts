@@ -5,10 +5,10 @@
  * is mocked; native access checks live in sandbox-windows-acl's runner suite.
  */
 
-import { existsSync, mkdtempSync, realpathSync, rmdirSync, rmSync, writeFileSync } from 'node:fs'
+import { lstatSync, existsSync, mkdtempSync, realpathSync, rmdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import type { SandboxPolicy } from '@deepseek-ai/dsh-sandbox'
 import { SessionId } from '@deepseek-ai/dsh-session'
@@ -63,6 +63,13 @@ vi.mock('@deepseek-ai/dsh-sandbox-windows-acl', () => {
     tempWriteSid: (path: string) => `TEMP:${path}`,
   }
 })
+
+vi.mock('node:fs', async (original) => {
+  const fs = await original<typeof import('node:fs')>()
+  return { ...fs, lstatSync: vi.fn(fs.lstatSync) }
+})
+
+afterEach(() => { vi.mocked(lstatSync).mockReset(); vi.restoreAllMocks() })
 
 const WORKSPACE_SID = 'S-1-4-42-42'
 
@@ -384,4 +391,63 @@ describe('windows-acl write grants (LocalSandboxProvider)', () => {
       cleanup()
     }
   })
+
+  it('preserves an unowned replacement during provider disposal', async () => {
+    const { sandbox, fiber } = await setup()
+    try {
+      const ws = workspaceRoot()
+      scratch.push(ws)
+      const confined = await sandbox.confine(['true'], {
+        mode: 'workspace-write', workspaceRoot: ws, sessionId: SessionId('unowned-at-disposal'),
+      })
+      const tempDir = flag(confined.argv, '--temp') ?? ''
+      rmdirSync(tempDir)
+      writeFileSync(tempDir, 'replacement')
+      await fiber.dispose()
+      expect(existsSync(tempDir)).toBe(true)
+      expect(mockState.grants.every(grant => grant.disposed)).toBe(true)
+    } finally { await fiber.dispose(); cleanup() }
+  })
+
+  it('reports an ownership inspection error and leaves the unverified temp path intact', async () => {
+    const { ctx, sandbox, fiber } = await setup()
+    try {
+      const ws = workspaceRoot()
+      scratch.push(ws)
+      const confined = await sandbox.confine(['true'], {
+        mode: 'workspace-write', workspaceRoot: ws, sessionId: SessionId('ownership-error'),
+      })
+      const tempDir = flag(confined.argv, '--temp') ?? ''
+      const failure = new Error('directory metadata unavailable')
+      vi.mocked(lstatSync).mockImplementationOnce(() => { throw failure })
+      const warn = vi.spyOn(ctx.logger, 'warn').mockImplementation(() => undefined)
+      await fiber.dispose()
+      expect(warn).toHaveBeenCalledWith(failure)
+      expect(existsSync(tempDir)).toBe(true)
+      expect(mockState.grants.every(grant => grant.disposed)).toBe(true)
+    } finally { await fiber.dispose(); cleanup() }
+  })
+
+  it.each(['removed', 'replaced'] as const)('rechecks a temp directory %s between ownership verification and removal', async (change) => {
+    const { ctx, sandbox, fiber } = await setup()
+    try {
+      const ws = workspaceRoot()
+      scratch.push(ws)
+      const confined = await sandbox.confine(['true'], {
+        mode: 'workspace-write', workspaceRoot: ws, sessionId: SessionId(`removal-race-${change}`),
+      })
+      const tempDir = flag(confined.argv, '--temp') ?? ''
+      const original = lstatSync(tempDir)
+      rmdirSync(tempDir)
+      if (change === 'replaced') writeFileSync(tempDir, 'replacement')
+      vi.mocked(lstatSync).mockReturnValueOnce(original)
+      const warn = vi.spyOn(ctx.logger, 'warn').mockImplementation(() => undefined)
+      await fiber.dispose()
+      expect(existsSync(tempDir)).toBe(change === 'replaced')
+      if (change === 'replaced') {
+        expect(warn).toHaveBeenCalledWith(expect.objectContaining({ message: `sandbox-local: private temp directory was replaced: ${tempDir}` }))
+      } else expect(warn).not.toHaveBeenCalled()
+    } finally { await fiber.dispose(); cleanup() }
+  })
+
 })

@@ -1,6 +1,7 @@
 - banner:
   - navigation "Session hierarchy": workspace
   - text: Standard mode
+  - button "Stop all"
   - button "More actions"
   - button "Open right sidebar"
   - tablist:
@@ -33,7 +34,7 @@
 - button "Copy"
 - button "Good response"
 - button "Bad response"
-- button "Branch into a new conversation"
+- button "Continue from here"
 - text: {{clock}}
 - button "Continuing goal {{clock}}":
   - text: Continuing goal
@@ -93,9 +94,9 @@
 - button "Copy"
 - button "Good response"
 - button "Bad response"
-- button "Branch into a new conversation"
+- button "Continue from here"
 - text: {{clock}}
-- textbox "Message or run a task, / commands, @ files or sessions"
+- textbox "Keep going, or drop in papers and data; / for commands, @ for files or conversations"
 - button "Add files or run commands"
 - 'button "Access mode, current: Workspace Write"': Workspace Write
 - button "Select model, current DeepSeek-V4-Flash": DeepSeek-V4-Flash

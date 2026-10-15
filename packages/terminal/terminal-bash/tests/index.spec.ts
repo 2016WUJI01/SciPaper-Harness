@@ -455,29 +455,27 @@ describe('BashTerminalBackend startup rollback', () => {
     expect(spawned?.env?.PROMPT_COMMAND).toBeUndefined()
   })
 
-  it('keeps waiting for stdin_read when the first settled output only echoes the prompt literal', async () => {
+  it.each(['', "function prompt { 'dsh> ' }\n"])('keeps waiting without resubmitting setup after startup output %j', async (initialOutput) => {
     const ctx = new Context()
     await ctx.plugin(EmptySandbox)
     await ctx.plugin(SessionProjectionRegistry)
     await ctx.plugin(SandboxPolicyService, { mode: 'danger-full-access', workspaceRoot: '/workspace' })
     const sends: TerminalSendRequest[] = []
-    const session = {
-      motd: '',
-      startSend: (request: TerminalSendRequest) => {
-        sends.push(request)
-        const second = sends.length > 1
-        return {
-          done: Promise.resolve({
-            viewport: second ? 'dsh> ' : "function prompt { 'dsh> ' }\n",
-            waitReason: second ? 'stdin_read' as const : 'inferred_idle' as const,
-            sessionStatus: { kind: 'running' as const }, truncated: false,
-          }),
-          readOutput: () => ({ delta: '', truncated: false }),
-          cancel: () => false,
-        }
-      },
-      read: () => ({ text: '', totalLines: 0, lineBegin: 0, lineEnd: 0, truncated: false }),
-    } as unknown as LocalPtySession
+    const session = stubLocalSession()
+    session.startSend = (request) => {
+      sends.push(request)
+      const second = sends.length > 1
+      return {
+        done: Promise.resolve({
+          viewport: second ? 'dsh> ' : initialOutput,
+          waitReason: second ? 'stdin_read' as const : 'inferred_idle' as const,
+          sessionStatus: { kind: 'running' as const }, truncated: false,
+        }),
+        readOutput: () => ({ delta: '', truncated: false }),
+        cancel: () => false,
+      }
+    }
+    session.read = () => ({ text: '', totalLines: 0, lineBegin: 0, lineEnd: 0, truncated: false })
     const backend = new BashTerminalBackend(
       ctx,
       { ...config(), shellDialect: 'pwsh', shellPath: 'pwsh' },
@@ -488,6 +486,55 @@ describe('BashTerminalBackend startup rollback', () => {
     expect(sends).toHaveLength(2)
     expect(sends[1]).toMatchObject({ text: '', submit: false })
     expect(session.motd).toBe('dsh> ')
+  })
+
+  it('writes pwsh setup once while the provider delays startup output across silence settlements', async () => {
+    vi.useFakeTimers()
+    const ctx = new Context()
+    await ctx.plugin(SessionProjectionRegistry)
+    await ctx.plugin(SandboxPolicyService, { mode: 'danger-full-access', workspaceRoot: '/workspace' })
+    const output = new PassThrough()
+    const exit = Promise.withResolvers<{ exitCode: number; signal: null }>()
+    const terminal = {
+      ...terminalHandle(),
+      output,
+      done: exit.promise,
+      write: vi.fn(async (_data: string) => {}),
+      inspectForeground: async () => ({ processGroupId: 123, inputWaiting: false }),
+      terminate: async () => { output.end(); exit.resolve({ exitCode: 0, signal: null }) },
+    }
+    const backend = new BashTerminalBackend(
+      ctx,
+      { ...config(), shellDialect: 'pwsh', timeoutMs: 500 },
+      async () => terminal,
+    )
+    const spawning = backend.spawn(spec(agent(ctx)))
+    let published = false
+    void spawning.then(() => { published = true }, () => {})
+    try {
+      await vi.advanceTimersByTimeAsync(120)
+      expect(published).toBe(false)
+      expect(terminal.write).toHaveBeenCalledExactlyOnceWith(ENCODING_PREAMBLE + PWSH_PROMPT_SETUP + '\r')
+      output.write(ENCODING_PREAMBLE + PWSH_PROMPT_SETUP + '\r\n')
+      await vi.advanceTimersByTimeAsync(60)
+      expect(published).toBe(false)
+      expect(terminal.write).toHaveBeenCalledOnce()
+      output.write('\x1b]133;D;0\x07dsh> ')
+      await vi.advanceTimersByTimeAsync(20)
+      const session = await spawning
+      expect(published).toBe(true)
+      expect(session.motd).toBe('dsh> ')
+      const command = session.startSend({ text: 'Write-Output result', submit: true })
+      await vi.advanceTimersByTimeAsync(60)
+      expect(await command.done).toMatchObject({ waitReason: 'inferred_idle', viewport: '' })
+      expect(terminal.write).toHaveBeenCalledTimes(2)
+      await session.close('test complete')
+    } finally {
+      await terminal.terminate()
+      await Promise.allSettled([spawning])
+      await ctx.fiber.dispose()
+      vi.useRealTimers()
+    }
   })
 
   it('rejects a pwsh bootstrap whose shell exits or times out', async () => {

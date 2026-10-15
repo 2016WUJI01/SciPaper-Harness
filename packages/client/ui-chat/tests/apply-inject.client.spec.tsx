@@ -24,6 +24,12 @@ import { createChatStore } from '../src/client/stores.ts'
 import { CHAT_SETTINGS_NAMESPACE, type ChatSettings } from '../src/chat-settings.ts'
 import type { MessageRevisionInjected } from '../src/client/chat/MessageRevisionHost.tsx'
 import type { LinkOpeningRowInjected } from '../src/client/settings/LinkOpeningRow.tsx'
+import type { StoredEntry } from '@deepseek-ai/dsh-client-ui-slots'
+
+/** The revision overlay's concrete face inside the registry's erased record. */
+interface RevisionOverlayEntry extends StoredEntry {
+  inject: () => MessageRevisionInjected & Record<string, unknown>
+}
 
 usePinnedBrowserLanguages('zh-CN')
 
@@ -121,6 +127,12 @@ async function bench(initialSettings?: ChatSettings, withBrowserRegistry = true,
     return { instance, injected }
   }
   return {
+    get revisionEditor() {
+      const entry = runtime.slots.entries('shell.overlay')
+        .find(item => item.options.id === 'chat.message-revision') as RevisionOverlayEntry | undefined
+      if (entry?.inject === undefined) throw new Error('revision overlay missing')
+      return entry.inject()
+    },
     get linkPreference() {
       const row = runtime.slots.entries('settings.general.item').find(entry => entry.options.id === 'link-opening')!
       const preference: object = row.inject!()
@@ -136,10 +148,7 @@ describe('Chat inject API', () => {
     const b = await bench()
     try {
       const { injected } = b.chatViewApi(b.rootReference)
-      const entry = b.runtime.slots.entries('shell.overlay').find(item => item.options.id === 'chat.message-revision')
-      if (entry?.inject === undefined) throw new Error('revision overlay missing')
-      const face: object = entry.inject()
-      const editor = face as MessageRevisionInjected
+      const editor = b.revisionEditor
       injected.reviseMessage?.(12, { text: 'Original', hasAttachments: true })
       editor.changeText('Edited with attachments')
       const failure = Promise.withResolvers<SessionId>()
@@ -504,4 +513,60 @@ describe('Chat inject API', () => {
     expect(injected.loadImage.peek?.(ATTACHMENT)).toBe(loaded)
     await b.runtime.dispose()
   })
+})
+
+it('checks revision eligibility again at submission and freezes edits while the accepted request is pending', async () => {
+  const b = await bench()
+  try {
+    const { injected } = b.chatViewApi(b.rootReference)
+    const editor = b.revisionEditor
+    const pending = Promise.withResolvers<SessionId>()
+    const fork = vi.spyOn(b.runtime.sessions, 'fork').mockReturnValueOnce(pending.promise)
+    editor.changeText('ignored without draft')
+    editor.submitRevision()
+    expect(fork).not.toHaveBeenCalled()
+    injected.reviseMessage?.(12, { text: 'Original', hasAttachments: false })
+    b.runtime.ctx.conversation.blocks.set(ROOT, { reason: 'Read only', readOnly: true })
+    editor.submitRevision()
+    expect(fork).not.toHaveBeenCalled()
+    b.runtime.ctx.conversation.blocks.set(ROOT, undefined)
+    await b.runtime.sessions.updateSummary(ROOT, { running: true })
+    editor.submitRevision()
+    expect(fork).not.toHaveBeenCalled()
+    expect(editor.hooks.revision.getSnapshot().error).toBe(b.runtime.ctx.locale.bind('chat')('message.stopToRevise'))
+    editor.dismissError()
+    expect(editor.hooks.revision.getSnapshot().error).toBeNull()
+    await b.runtime.sessions.updateSummary(ROOT, { running: false })
+    editor.submitRevision()
+    editor.changeText('ignored while pending')
+    editor.closeRevision()
+    expect(editor.hooks.revision.getSnapshot()).toMatchObject({ pending: true, draft: { text: 'Original' } })
+    pending.resolve(ROOT)
+    await vi.waitFor(() => { expect(editor.hooks.revision.getSnapshot().pending).toBe(false) })
+    injected.reviseMessage?.(13, { text: 'Next', hasAttachments: false })
+    editor.closeRevision()
+    expect(editor.hooks.revision.getSnapshot()).toEqual({ draft: null, pending: false, error: null })
+  } finally { await b.runtime.dispose() }
+})
+
+it('opens an accepted revision even if its subsequent title update fails and shows non-Error rejection details', async () => {
+  const b = await bench()
+  try {
+    const { injected } = b.chatViewApi(b.rootReference)
+    const editor = b.revisionEditor
+    const child = 'accepted-child' as SessionId
+    vi.spyOn(b.runtime.sessions, 'fork').mockImplementationOnce(async (input) => {
+      input.onCreated?.(child)
+      throw 'title update refused'
+    }).mockRejectedValueOnce('fork unavailable')
+    injected.reviseMessage?.(12, { text: 'Edited', hasAttachments: false })
+    editor.submitRevision()
+    await vi.waitFor(() => { expect(b.openSession).toHaveBeenCalledExactlyOnceWith(child) })
+    expect(editor.hooks.revision.getSnapshot()).toMatchObject({ draft: null, pending: false })
+    expect(editor.hooks.revision.getSnapshot().error).toContain('title update refused')
+    editor.dismissError()
+    injected.forkAt(17)
+    await vi.waitFor(() => { expect(editor.hooks.revision.getSnapshot().error).toContain('fork unavailable') })
+    expect(b.openSession).toHaveBeenCalledOnce()
+  } finally { await b.runtime.dispose() }
 })

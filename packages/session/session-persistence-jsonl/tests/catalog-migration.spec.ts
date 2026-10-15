@@ -352,6 +352,32 @@ describe.each(['none', 'zstd'] as const)('historical catalog publication (%s)', 
     await expect(prepareCatalogFacts(f.parent, [{ path, header }], compression, controller.signal)).rejects.toThrow('cancelled child collection')
   })
 
+  it('preserves an SSH child descriptor only while its indexed execution identity matches', async () => {
+    const f = await fixture()
+    const header: SessionHeader = {
+      version: SESSION_FORMAT_VERSION, id: SessionId('ssh-child'), createdAt: 2,
+      isSeeded: false, origin: 'subagent', parentSession: f.parent, delegationDepth: 1,
+      execution: { kind: 'ssh', host: 'gpu-a' },
+    }
+    const path = generationLogPath(f.root, undefined, header.id, SESSION_FORMAT_VERSION, compression)
+    await mkdir(dirname(path), { recursive: true })
+    const first = JSON.stringify({ type: 'session', ...header }) + '\n'
+    const body = JSON.stringify(f.descriptor) + '\n'
+    const original = compression === 'none' ? Buffer.from(first + body)
+      : Buffer.concat([await compressZstdFrame(first), await compressZstdFrame(body)])
+    await writeFile(path, original)
+    const signal = new AbortController().signal
+    const prepared = await prepareCatalogFacts(f.parent, [{ path, header }], compression, signal)
+    expect(prepared.failures).toEqual([])
+    expect(prepared.facts).toMatchObject([{ childId: header.id, descriptor: f.descriptor.data }])
+    await prepared.validate()
+    for (const execution of [{ kind: 'ssh', host: 'gpu-b' }, { kind: 'local' }] as const) {
+      await expect(prepareCatalogFacts(f.parent, [{ path, header: { ...header, execution } }], compression, signal))
+        .rejects.toThrow('changed')
+    }
+    expect(await readFile(path)).toEqual(original)
+  })
+
   it.each([0, 1, 2])('composes a V%i parent and child through all preceding edges', async (version) => {
     const f = await fixture()
     const initial = generationLogPath(f.root, undefined, f.parent, 3, compression)

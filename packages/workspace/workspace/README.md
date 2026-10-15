@@ -88,7 +88,7 @@ This section explains the design decisions behind the feature and points at the 
 
 ### Design philosophy
 
-- **One record per canonical path.** `fs.realpath` is the single uniqueness canon: paths are stored canonicalized, so a symlink to an owned directory collides, and uniqueness is string equality of canonical paths.
+- **One record per execution location.** Local paths use `fs.realpath`, so a symlink to an owned directory collides. SSH identities include the host and normalized absolute POSIX path; the same directory on different hosts remains distinct. The durable schema rejects unknown location kinds, blank SSH hosts, and noncanonical SSH paths.
 - **Membership is ownership plus a live cwd fact.** The record's ordered `sessionIds` is the ownership truth; the startup header index validates it, and `sessionIds` filters on read while the next mutation prunes durably.
 - **Header-only reads.** Bootstrap and attach validation read `SessionHeader` fields only; event bodies are never loaded.
 - **Two-write mutations with an explicit marker.** Create and delete persist a `pendingMutation` marker before the record/order pair can diverge, so startup completes exactly the interrupted operation and unmarked divergence fails loud as corruption.

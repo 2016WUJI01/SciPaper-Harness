@@ -458,6 +458,37 @@ describe('LocalBashExecutor.start (background process handles)', () => {
     expect(ex.readOutput().delta).toBe('')
   })
 
+  it.each(['not-empty', 'rejected', 'unprintable'] as const)('reports %s cleanup without rejecting done or losing the leader outcome', async (failure) => {
+    const { ctx, bash } = await setup()
+    const cleanupError = new Error('process inspector unavailable')
+    if (failure === 'unprintable') Object.defineProperty(cleanupError, Symbol.toPrimitive, {
+      value: () => { throw new Error('cleanup formatting failed') },
+    })
+    const reader: SubprocessOutputReader = { readFrom: () => ({ text: '', nextOffset: 0, lossy: false }) }
+    const terminate = vi.fn()
+    const spawn = vi.spyOn(ctx.subprocess, 'spawn').mockReturnValue({
+      control: undefined, stdin: undefined, stdout: undefined, stderr: undefined,
+      collected: { stdout: reader, stderr: reader },
+      done: Promise.resolve({ exitCode: 42, signal: null }), terminate,
+      waitForExit: async () => { if (failure === 'not-empty') return false; throw cleanupError },
+    } satisfies SubprocessHandle)
+    try {
+      const proc = await start(bash, bash.resolve({ command: 'true' }))
+      await expect(proc.done).resolves.toBeUndefined()
+      expect(proc.status).toBe('completed')
+      expect(proc.exitCode).toBe(42)
+      expect(terminate).toHaveBeenCalledOnce()
+      expect(proc.failure).toContain('work may be orphaned')
+      const detail = failure === 'not-empty' ? 'process range did not become empty'
+        : failure === 'unprintable' ? 'unprintable cleanup failure' : 'process inspector unavailable'
+      expect(proc.observed.stderr.readFrom(0).text).toContain(detail)
+      expect(proc.readOutput().delta).toContain(detail)
+      expect(proc.readOutput().delta).toBe('')
+      if (failure === 'not-empty') await expect(proc.result()).rejects.toThrow(detail)
+      else await expect(proc.result()).rejects.toBe(cleanupError)
+    } finally { spawn.mockRestore(); await ctx.fiber.dispose() }
+  })
+
   it('settles an unprintable provider rejection instead of rejecting done', async () => {
     const { ctx, bash } = await setup()
     const emptyReader: SubprocessOutputReader = {

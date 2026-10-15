@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import { composeEntries, loadOverlayPatches } from '@deepseek-ai/dsh-app-boot'
 import { DEVELOPER_ROWS, TELEMETRY_ROWS, USER_SURFACE_ROWS } from './research-edition-rows.ts'
+import { name } from '../src/index.ts'
 
 const BASE_PATCH = fileURLToPath(new URL('../../base/cordis.patch.yml', import.meta.url))
 const WEB_PATCH = fileURLToPath(new URL('../../web-app/cordis.patch.yml', import.meta.url))
@@ -29,6 +30,10 @@ function row(id: string): (typeof rows)[number] {
 }
 
 describe('the Web composition of the research edition', () => {
+  it('identifies its composition with the research bundle name', () => {
+    expect(name).toBe('research-app')
+  })
+
   it.each([...TELEMETRY_ROWS, ...DEVELOPER_ROWS])('keeps the %s row disabled', (id) => {
     expect(row(id).disabled).toBe(true)
   })

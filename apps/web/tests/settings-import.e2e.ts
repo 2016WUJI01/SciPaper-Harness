@@ -28,7 +28,7 @@ it('imports settings.yaml into the profile once and applies the imported values'
     await expect.poll(() => config('ui-theme')?.['fontSize'], { timeout: 10_000 }).toBe(16)
     expect(config('ui-settings')?.['enabled']).toBe(false)
     expect(config('ui-settings-general')?.['welcomeNoticeVersion']).toBe(WELCOME_NOTICE_VERSION)
-    expect(existsSync(join(harnessHome, 'settings.yaml'))).toBe(false)
+    await expect.poll(() => existsSync(join(harnessHome, 'settings.yaml'))).toBe(false)
     expect(readFileSync(join(harnessHome, 'settings.yaml.imported'), 'utf8')).toContain('fontSize: 16')
 
     const page = await browser.newPage({ viewport: { width: 1680, height: 1000 }, locale: ZH_BROWSER_LOCALE })

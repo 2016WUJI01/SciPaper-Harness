@@ -3,9 +3,20 @@
 - button "插件说明"
 - button "刷新"
 - button "添加插件"
-- heading "官方" [level=3]
-- text: "8"
+- heading "科研扩展" [level=3]
+- text: "1"
 - list:
+  - listitem:
+    - button "查看 知识图谱": 知识图谱
+    - text: 探索研究思路与论文的关联、比较研究主张、构建项目图谱，查看每条结论背后的证据，留住以往研究留给下一项研究的内容，并记录方法、任务和数据集之间的关系。所有科研模式均可使用。
+    - switch "启用 知识图谱"
+- heading "官方" [level=3]
+- text: "12"
+- list:
+  - listitem:
+    - button "查看 桌面操作": 桌面操作
+    - text: 让智能体通过 Cua Driver 查看和操作本机桌面。
+    - switch "启用 桌面操作"
   - listitem:
     - button "查看 智能体团队": 智能体团队
     - text: 实验性 启用团队协作、团队工具、成员列表和共享任务看板。
@@ -22,6 +33,18 @@
     - button "查看 语音输入": 语音输入
     - text: 实验性 在本机使用 SenseVoice 转写录音，首次使用需安装依赖。
     - switch "启用 语音输入"
+  - listitem:
+    - button "查看 SSH 后端（仅无界面配置）": SSH 后端（仅无界面配置）
+    - text: 仅为已配置的非桌面环境切换文件、进程与沙箱服务。桌面版要使用远端文件、终端和 LSP，请从侧栏选择「添加 SSH 工作区」。
+    - switch "启用 SSH 后端（仅无界面配置）"
+  - listitem:
+    - button "查看 Exa 搜索": Exa 搜索
+    - text: 待配置 API key 通过 Exa 检索网络。需要 API key；未配置前不可使用。
+    - switch "启用 Exa 搜索"
+  - listitem:
+    - button "查看 Perplexity 搜索": Perplexity 搜索
+    - text: 待配置 API key 通过 Perplexity 检索网络。需要 API key；未配置前不可使用。
+    - switch "启用 Perplexity 搜索"
   - listitem:
     - button "查看 终端": 终端
     - text: 限制每条命令最多能跑多久、最多输出多少内容。

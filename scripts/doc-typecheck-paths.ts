@@ -1,5 +1,12 @@
-/** Map one workspace source alias target to its declaration-build target. */
+/**
+ * Map a workspace source alias to built types, preserving existing lib declaration targets.
+ * @param candidate - Workspace alias target from the base TypeScript configuration.
+ * @returns The built declaration path; rejects aliases outside source or built declaration paths.
+ */
 export function builtDeclarationPath(candidate: string): string {
+  if (candidate.includes('/lib/') && candidate.endsWith('.d.ts') && !candidate.split('/').includes('..')) {
+    return candidate
+  }
   // Two workspace path forms exist: whole-package entries end in /src, subpath
   // wildcards (browser-safe /types and /client channels) in /src/*.
   if (candidate.endsWith('/src')) {

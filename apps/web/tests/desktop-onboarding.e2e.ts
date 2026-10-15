@@ -197,7 +197,7 @@ describe.skipIf(MODE === 'record')('web e2e: App-only desktop onboarding', () =>
     const web = await browser.newPage({ viewport: { width: 1280, height: 840 }, locale: ZH_BROWSER_LOCALE })
     try {
       await web.goto(scaffold.authenticatedUrl, { waitUntil: 'load' })
-      await web.getByText('选择一个工作区开始', { exact: true }).waitFor()
+      await web.getByText('今天想推进什么？', { exact: true }).waitFor()
       expect(await web.locator('[data-desktop-onboarding]').count()).toBe(0)
       expect((scaffold.ctx.settings.describe().find(row => row.ns === NS)?.value as { step: string }).step).toBe('welcome')
     } finally { await web.close() }
@@ -358,7 +358,7 @@ describe.skipIf(MODE === 'record')('web e2e: App-only desktop onboarding', () =>
     const warningsAfter = tripwire.warnings.length
     await page.reload({ waitUntil: 'load' })
     acknowledgeReloadConnectionLoss(tripwire, warningsAfter)
-    await page.getByText('选择一个工作区开始', { exact: true }).waitFor()
+    await page.getByText('今天想推进什么？', { exact: true }).waitFor()
     expect(await page.locator('[data-desktop-onboarding]').count()).toBe(0)
     expect(tripwire.pageErrors).toEqual([])
     await page.close()
@@ -424,7 +424,7 @@ describe.skipIf(MODE === 'record')('web e2e: App-only desktop onboarding', () =>
       kind: 'grant', payload: { version: 1, issuer: origin, token: 'onboarding-fixture-token' },
     }))
     await page.reload({ waitUntil: 'load' })
-    await page.getByText('选择一个工作区开始', { exact: true }).waitFor()
+    await page.getByText('今天想推进什么？', { exact: true }).waitFor()
     expect(await page.locator('[data-desktop-onboarding]').count()).toBe(0)
     await page.close()
   })

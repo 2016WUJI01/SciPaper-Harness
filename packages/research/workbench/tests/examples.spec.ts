@@ -126,6 +126,24 @@ describe('product-owned research examples', () => {
     expect((await stat(join(exampleDirectory(home), 'catalog.json'))).mtimeMs).toBe(marker.mtimeMs)
   })
 
+  it('preserves inline evidence and refuses to reconstruct chunks from a changed source', async () => {
+    const home = join(await temporary(), 'home'), fixture = registration()
+    await initializeResearchExamples(home, assets, fixture.api)
+    const project = [...fixture.records.values()][0]!
+    const inline = project.evidence[0]!, changed = project.evidence[1]!
+    inline.chunks = [{ text: 'Legacy inline evidence', locator: { line: 1 } }]
+    await rm(join(project.root, `.research/chunks/${inline.id}/1.json`))
+    await rm(join(project.root, `.research/chunks/${changed.id}/1.json`))
+    await writeFile(join(project.root, changed.path), 'Changed source bytes')
+    const before = structuredClone(project)
+    await initializeResearchExamples(home, assets, fixture.api)
+    expect(project).toEqual(before)
+    expect(fixture.put).toHaveBeenCalledTimes(2)
+    for (const source of [inline, changed]) {
+      await expect(stat(join(project.root, `.research/chunks/${source.id}/1.json`))).rejects.toMatchObject({ code: 'ENOENT' })
+    }
+  })
+
   it('resumes after registration is interrupted and serializes simultaneous installers', async () => {
     const home = join(await temporary(), 'home'), fixture = registration()
     const conversation = (project: ResearchProject, material: ResearchExample['conversation']) => fixture.api.conversation(project, material)
@@ -235,6 +253,24 @@ describe('official example conversation persistence', () => {
           .toMatchSnapshot(example.id)
       } finally { await reader.close() }
     }
+  })
+
+  it.each(['no-step', 'closed-step', 'earlier-step'] as const)('closes an interrupted %s prefix without fabricating a step end', (kind) => {
+    const session = Session.create(SessionId(`scipaper-example-${kind}`))
+    const material = { question: 'Question', answer: 'Answer' }
+    session.append('turn/start', { turn: 1 })
+    if (kind !== 'no-step') {
+      session.append('step/start', { turn: 1, step: 1 })
+      session.append('step/end', { turn: 1, step: 1 })
+    }
+    if (kind === 'earlier-step') {
+      session.append('turn/end', { turn: 1, reason: { kind: 'completed' } })
+      session.append('turn/start', { turn: 2 })
+    }
+    const before = history(session).filter(event => event.type === 'step/end').length
+    appendExampleConversation(session, history(session), material)
+    expect(history(session).filter(event => event.type === 'step/end')).toHaveLength(before + 1)
+    expect(history(session).filter(event => event.type === 'assistant/message')).toHaveLength(1)
   })
 
   it('closes an interrupted prefix without duplicating its question and refuses foreign message content', () => {

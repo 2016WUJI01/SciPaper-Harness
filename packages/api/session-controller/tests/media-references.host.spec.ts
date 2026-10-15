@@ -247,6 +247,23 @@ describe('SessionMediaReferences /api/file', () => {
     expect(localRead).not.toHaveBeenCalled()
   })
 
+  it('refuses an unresolved session when the controller is unavailable', async () => {
+    const route = await mount()
+    const response = await route.raw('http://127.0.0.1/api/file?path=/remote/image.png&sessionId=missing')
+    expect(response.status).toBe(503)
+    expect(await response.text()).toBe('Session service unavailable')
+  })
+
+  it('uses the local filesystem when activation resolves a local session', async () => {
+    const route = await mount(DEFAULT_LIMIT, (ctx) => {
+      ctx.provide('sessionController', { resolveAgent: async () => ({ agent: { ctx, session: { header: {} } } }) } as never)
+    })
+    const path = join(root, 'activated-local.png')
+    await writeFile(path, PNG_BYTES)
+    const response = await route.raw(`http://127.0.0.1/api/file?path=${encodeURIComponent(path)}&sessionId=local-new`)
+    expect(await responseBytes(response)).toEqual(PNG_BYTES)
+  })
+
   it('reads a known local session without activating its Agent', async () => {
     const resolveAgent = vi.fn(() => { throw new Error('local Agent must remain cold') })
     const route = await mount(DEFAULT_LIMIT, (ctx) => {

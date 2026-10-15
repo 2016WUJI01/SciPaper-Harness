@@ -62,8 +62,8 @@ export function restoreReleasedV5Artifact(
   knownEventTypes: ReadonlySet<string>,
 ): SessionFormatArtifact {
   assertReleasedV5Header(artifact.header)
-  restoreReleasedV4Artifact({ ...artifact, header: v4HeaderOf(artifact.header) }, knownEventTypes)
   assertReleasedV5DeliveryRelationships(artifact, knownEventTypes)
+  restoreReleasedV4Artifact({ ...artifact, header: v4HeaderOf(artifact.header) }, knownEventTypes)
   return artifact
 }
 
@@ -76,8 +76,8 @@ export function assertReleasedV5Relationships(
   artifact: SessionFormatArtifact,
   knownEventTypes: ReadonlySet<string>,
 ): void {
-  assertReleasedV4Relationships({ ...artifact, header: v4HeaderOf(artifact.header) }, knownEventTypes)
   assertReleasedV5DeliveryRelationships(artifact, knownEventTypes)
+  assertReleasedV4Relationships({ ...artifact, header: v4HeaderOf(artifact.header) }, knownEventTypes)
 }
 
 function assertReleasedV5DeliveryRelationships(

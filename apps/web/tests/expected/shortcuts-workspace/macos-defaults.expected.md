@@ -37,8 +37,8 @@
         - button "Edit shortcut for Toggle right sidebar"
         - text: Toggle right sidebar ⇧ ⌘ B
       - listitem:
-        - button "Edit shortcut for Workspace files"
-        - text: Workspace files ⌥ ⌘ P
+        - button "Edit shortcut for Research files"
+        - text: Research files ⌥ ⌘ P
       - listitem:
         - button "Edit shortcut for New terminal"
         - text: "New terminal ⌃ `"

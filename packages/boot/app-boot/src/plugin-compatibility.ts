@@ -71,6 +71,16 @@ export function getDshRuntimeVersion(): string {
 }
 
 /**
+ * Read the installed product release independently of its embedded DSH kernel.
+ * @returns the validated package version used by the CLI and startup reports.
+ * @throws if package.json cannot be read or its version is missing or invalid.
+ */
+export function getDshProductVersion(): string {
+  const manifest = runtimeManifest()
+  return runtimeVersionOf(Object.hasOwn(manifest, 'version') ? manifest.version : undefined)
+}
+
+/**
  * Check upstream dsh peers against the kernel and research-only peers against
  * the product release. Packages declaring the host's exact SciPaper release
  * and kernel identity use product versions for all dsh peers. Mismatched or

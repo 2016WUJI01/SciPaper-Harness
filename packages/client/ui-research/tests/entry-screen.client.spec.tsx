@@ -12,7 +12,7 @@ import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { WorkspaceId } from '@deepseek-ai/dsh-workspace/types'
 import { newProject } from '@deepseek-ai/dsh-research-workbench/src/project.ts'
 import type { ResearchProject, ResearchSnapshot } from '@deepseek-ai/dsh-research-workbench/types'
-import { ResearchEntryFeedback, ResearchEntryLine, ResearchTryChips, type EntryLineProps, type TryChipsProps } from '../src/client/EntryScreen.tsx'
+import { ResearchEntryFeedback, ResearchEntryLine, ResearchTryChips, ResearchWorkspaceLabel, type EntryLineProps, type TryChipsProps } from '../src/client/EntryScreen.tsx'
 import type { EntryNotice, ResearchView } from '../src/client/contract.ts'
 import { zh } from '../src/client/locales.ts'
 import { standingOf } from './fixtures/standing.ts'
@@ -150,4 +150,24 @@ describe('the Try sentences', () => {
       cleanup()
     }
   })
+})
+
+it('labels the chosen workspace and falls back while its research is absent or loading', () => {
+  const props = lineProps({}).props
+  const view = render(<ResearchWorkspaceLabel {...props} label={undefined} workspaceId={named.workspaceId} />)
+  expect(view.container.textContent).toBe(named.title)
+  view.rerender(<ResearchWorkspaceLabel {...props} label={undefined} workspaceId={'missing' as WorkspaceId} />)
+  expect(view.container.textContent).toBe(zh.treeLoose)
+  view.rerender(<ResearchWorkspaceLabel {...lineProps({ snapshot: null }).props} label={undefined} workspaceId={named.workspaceId} />)
+  expect(view.container.textContent).toBe(zh.treeLoose)
+})
+
+it('withholds the entry line before loading and shows opening progress independently of notices', () => {
+  const props = lineProps({ snapshot: null }).props
+  const view = render(<ResearchEntryLine {...props} />)
+  expect(view.container.innerHTML).toBe('')
+  view.rerender(<ResearchEntryFeedback {...props} />)
+  expect(view.container.innerHTML).toBe('')
+  view.rerender(<ResearchEntryFeedback {...props} useEntry={select => select({ notice: null, pending: true })} />)
+  expect(view.getByRole('status').getAttribute('aria-label')).toBe(zh.entryOpening)
 })

@@ -435,7 +435,7 @@ describe('web e2e: resident question composer round trip', () => {
       // Session-scoped store to restore both option and free-text drafts.
       const originalRow = page.locator('[role="treeitem"]')
         .filter({ hasText: 'Use the ask_user_question tool' }).first()
-      await page.getByRole('button', { name: 'New session', exact: true }).last().click()
+      await page.getByRole('button', { name: 'New conversation', exact: true }).last().click()
       // Scope to the tree: the wide sidebar's New Session button carries the
       // same visible label, and an unscoped match would either settle on the
       // button before the row exists or trip strict mode once it does.

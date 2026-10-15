@@ -91,7 +91,7 @@ function cloneForVersion(manifest: object, version: string): MutableRegistryMani
  * @returns Registry metadata containing both synthetic DSH releases and unchanged external packages.
  */
 export function buildDualDshRegistry(index: RegistryIndex, sourceVersion: string): RegistryIndex {
-  const output = new Map(index)
+  const output = Object.assign(new Map(index), index.overrides === undefined ? {} : { overrides: index.overrides })
   let dshPackages = 0
   for (const [name, versions] of index) {
     if (!isDshPackage(name)) {

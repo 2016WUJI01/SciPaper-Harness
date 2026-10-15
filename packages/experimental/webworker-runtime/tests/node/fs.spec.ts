@@ -63,6 +63,8 @@ check('statSync isFile', fs.statSync('/dsh/config/cordis.yml').isFile(), true)
 check('statSync size', fs.statSync('/dsh/config/cordis.yml').size, 12)
 check('statSync dir', fs.statSync('/dsh/config').isDirectory(), true)
 check('realpathSync', fs.realpathSync('/dsh/config/../config/cordis.yml'), '/dsh/config/cordis.yml')
+check('native realpathSync', fs.default.realpathSync.native('/dsh/config/../config/cordis.yml'), '/dsh/config/cordis.yml')
+throws('native realpathSync reports missing paths', () => fs.realpathSync.native('/dsh/missing-realpath'), 'ENOENT')
 
 test('native realpath supports the filesystem provider promise wrapper', async () => {
   expect(fs.default.realpath).toBe(fs.realpath)

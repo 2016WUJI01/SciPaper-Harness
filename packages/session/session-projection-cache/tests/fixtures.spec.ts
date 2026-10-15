@@ -129,20 +129,30 @@ async function placeDoc(root: string, id: string, name: string): Promise<Fixture
  * format stamps, lineage, and the freshly folded title.
  */
 async function assertRewrite(ctx: Context, root: string, id: SessionId): Promise<void> {
+  const nextWrite = (): Promise<void> => new Promise((resolve) => {
+    const dispose = ctx.on('domain/changed', (change) => {
+      if (change.domain !== projectionCacheDomainSpec.name || change.table !== 'sessions'
+        || change.key !== id || change.operation !== 'put') return
+      dispose()
+      resolve()
+    })
+  })
+  const created = nextWrite()
   const session = ctx.sessions.create(id)
+  await created
+  const rewritten = nextWrite()
   session.append('fixtures-test/set-title', { title: '重写标题' })
   session.append('turn/end', { turn: 1, reason: { kind: 'completed' } })
+  await rewritten
   const path = join(root, projectionCacheDomainSpec.name, 'sessions', `${id}.json`)
-  await vi.waitFor(async () => {
-    const doc = JSON.parse(await readFile(path, 'utf8')) as FixtureDoc
-    expect(doc.version).toBe(projectionCacheDomainSpec.version)
-    expect(doc.record.identity).toMatchObject({
-      formatVersion: SESSION_FORMAT_VERSION,
-      isSeeded: false,
-      inheritedEventCount: 0,
-    })
-    expect(doc.record.rows['title']?.val).toBe('重写标题')
-  }, { timeout: 5_000 })
+  const doc = JSON.parse(await readFile(path, 'utf8')) as FixtureDoc
+  expect(doc.version).toBe(projectionCacheDomainSpec.version)
+  expect(doc.record.identity).toMatchObject({
+    formatVersion: SESSION_FORMAT_VERSION,
+    isSeeded: false,
+    inheritedEventCount: 0,
+  })
+  expect(doc.record.rows['title']?.val).toBe('重写标题')
 }
 
 afterEach(async () => {

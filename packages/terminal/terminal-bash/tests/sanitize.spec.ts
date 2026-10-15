@@ -44,6 +44,8 @@ describe('TerminalSanitizer', () => {
     expect(sanitizer.push('plain\x1b[1C')).toEqual({ text: 'plain', prompt: false })
     expect(sanitizer.push('\x1b]133;D;0\x07dsh>\x1b[')).toEqual({ text: 'dsh>', prompt: true, promptTail: 'dsh>' })
     expect(sanitizer.push('1C')).toEqual({ text: '', prompt: false, promptTail: ' ' })
+    expect(sanitizer.push('\x1b[C')).toEqual({ text: '', prompt: false, promptTail: ' ' })
+    expect(sanitizer.push('\x1b[0C')).toEqual({ text: '', prompt: false, promptTail: ' ' })
     expect(sanitizer.push('\x1b[99999999999999999999C')).toEqual({ text: '', prompt: false, promptTail: '      ' })
     expect(sanitizer.push('\x1b[?1C')).toEqual({ text: '', prompt: false, promptTail: '' })
     const ordinary = new TerminalSanitizer(64)

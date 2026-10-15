@@ -66,8 +66,8 @@ describe.skipIf(webSnapshotMode() === 'record')('web session replay', () => {
       await compareOrRefreshGolden(UI_EXPECTED,
         await captureExpandedTurnProcessAria(page, '[class*="centerCol"]', scaffold.workspaceCwd), 'replay')
 
-      await page.getByRole('button', { name: 'New session', exact: true }).last().click()
-      await page.getByText('Into the Unknown', { exact: true }).waitFor()
+      await page.getByRole('button', { name: 'New conversation', exact: true }).last().click()
+      await page.getByText('What shall we work on today?', { exact: true }).waitFor()
       await page.getByRole('treeitem').filter({ has: page.getByText('Use the bash tool to', { exact: true }) }).click()
       await page.getByText('DONE', { exact: true }).waitFor({ timeout: 15_000 })
       await compareOrRefreshGolden(UI_EXPECTED,

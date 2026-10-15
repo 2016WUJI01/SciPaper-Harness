@@ -11,6 +11,8 @@ import { open, readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { z } from 'zod'
 import { runtimeAsset } from './components.ts'
+import { followedRuns, latestRun, nameMatches } from './board-values.ts'
+export { followedRuns, latestRun, nameMatches } from './board-values.ts'
 import { atomicWrite, errorText, projectPath, readText } from './files.ts'
 import { checked, runProcess, ssh, type ProcessResult } from './process.ts'
 import { boardAlertSchema, boardSectionSchema, boardSpecSchema, boardStatSchema, withoutNulls } from './schema.ts'
@@ -104,40 +106,6 @@ export function issueText(error: z.ZodError, prefix = ''): string {
     const path = [prefix, ...issue.path.map(String)].filter(Boolean).join('.')
     return `${path || 'board'}: ${issue.message}`
   }).join('; ')
-}
-
-/**
- * Whether a run name matches a pattern in which `*` matches anything.
- * @param pattern - the name, with `*` for any run of characters.
- * @param name - a run name.
- * @returns whether the whole name matches.
- */
-export function nameMatches(pattern: string, name: string): boolean {
-  const expression = pattern.split('*').map(part => part.replace(/[.+?^${}()|[\]\\]/g, '\\$&')).join('.*')
-  return new RegExp(`^${expression}$`).test(name)
-}
-
-/**
- * The runs a board value follows: the run with that id, else every run of that name (and seed).
- * @param project - the runs on record.
- * @param ref - the run it names (an id, or a name) and the seed, when one is picked.
- * @returns the followed runs, in record order.
- */
-export function followedRuns(project: Pick<ResearchProject, 'experiments'>, ref: { run?: string | undefined; seed?: number | undefined }): ExperimentRecord[] {
-  if (ref.run === undefined) return []
-  const byId = project.experiments.filter(run => run.id === ref.run)
-  if (byId.length) return byId
-  return project.experiments.filter(run => run.spec.name === ref.run && (ref.seed === undefined || run.spec.seed === ref.seed))
-}
-
-/**
- * The run a chart line follows: the latest of those {@link followedRuns} finds.
- * @param project - the runs on record.
- * @param ref - the run it names (an id, or a name) and the seed, when one is picked.
- * @returns the latest followed run, or undefined when none is.
- */
-export function latestRun(project: Pick<ResearchProject, 'experiments'>, ref: { run?: string | undefined; seed?: number | undefined }): ExperimentRecord | undefined {
-  return followedRuns(project, ref).sort((a, b) => a.createdAt.localeCompare(b.createdAt)).at(-1)
 }
 
 /** Every run reference a set of blocks makes, and the `runs` block patterns. */

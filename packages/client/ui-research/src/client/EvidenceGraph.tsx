@@ -9,6 +9,7 @@ import { Tag, type TagTone } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { EvidenceClaimStatus, EvidenceGraphClaim, EvidenceGraphPage, ResearchProject } from '@deepseek-ai/dsh-research-workbench/types'
 import type { WorkbenchProps } from './contract.ts'
 import { ActionError, useAction } from './Action.tsx'
+import { loadResearchPage } from './researchPage.ts'
 import {
   CLAIM_HEIGHT, SOURCE_HEIGHT, cardWhere, citationMeta, countChips, evidenceLayout, expectedRuns, invalidationLines, nextStepKey,
   sourceIndex, sourceKindText, sourceLabel, sourceMeta, statusText, supportOf, whereText, type EvidenceLayout,
@@ -151,18 +152,10 @@ export function EvidenceView(props: WorkbenchProps & { project: ResearchProject 
   const [error, setError] = useState('')
   const [chosen, setChosen] = useState<string | undefined>()
   const latest = useRef(0)
-  useEffect(() => {
-    const ticket = ++latest.current
-    props.run({ action: 'evidence-graph', projectId: project.id }).then((result) => {
-      if (ticket !== latest.current) return
-      if (!result.evidenceGraph) throw new Error(t('kgNoResponse'))
-      setPage(result.evidenceGraph)
-      setError('')
-    }).catch((reason: unknown) => {
-      if (ticket === latest.current) setError(reason instanceof Error ? reason.message : String(reason))
-    })
-    return () => { latest.current++ }
-  }, [project.id, project.revision])
+  useEffect(() => loadResearchPage({
+    latest, request: () => props.run({ action: 'evidence-graph', projectId: project.id }),
+    field: 'evidenceGraph', missingResponse: () => t('kgNoResponse'), setPage, setError,
+  }), [project.id, project.revision])
   const claim = page === null ? undefined : page.claims.find(item => item.id === chosen) ?? page.claims[0]
   return <section className={styles.view} data-evidence-view aria-busy={page === null && error === ''}>
     <ActionError t={t} error={error} />

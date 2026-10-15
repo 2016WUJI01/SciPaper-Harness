@@ -37,8 +37,8 @@
         - button "Edit shortcut for Toggle right sidebar"
         - text: Toggle right sidebar Ctrl + Shift + B
       - listitem:
-        - button "Edit shortcut for Workspace files"
-        - text: Workspace files Ctrl + Alt + P
+        - button "Edit shortcut for Research files"
+        - text: Research files Ctrl + Alt + P
       - listitem:
         - button "Edit shortcut for New terminal"
         - text: "New terminal Ctrl + `"

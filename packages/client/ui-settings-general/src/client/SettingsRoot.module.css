@@ -244,11 +244,14 @@
 
 @media (max-width: 640px) {
   .panel {
+    flex-direction: column;
+  }
+
+  :global(html:not([data-windows-titlebar]):not([data-platform='darwin'])) .panel {
     width: 100%;
     height: 100%;
     max-width: none;
     max-height: 100dvh;
-    flex-direction: column;
     border-radius: 0;
     box-shadow: none;
   }

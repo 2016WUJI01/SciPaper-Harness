@@ -9,6 +9,7 @@ import { Switch, Tag } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { MemoryKind, ProjectId, ResearchMemoryPage, ResearchProject } from '@deepseek-ai/dsh-research-workbench/types'
 import type { WorkbenchProps } from './contract.ts'
 import { ActionError, useAction } from './Action.tsx'
+import { loadResearchPage } from './researchPage.ts'
 import {
   CHIP_HEIGHT, KINDS, LESSONS_SHOWN, NEXT_HEIGHT, RESEARCH_HEIGHT, chipKind, kindTitle, lessonText, memoryLayout, nextMeta, researchMeta,
   switchDetail, type MemoryLayout,
@@ -146,18 +147,10 @@ export function MemoryView(props: WorkbenchProps & { project: ResearchProject })
   const [chosen, setChosen] = useState<ProjectId | undefined>()
   const latest = useRef(0)
   const switching = useAction()
-  useEffect(() => {
-    const ticket = ++latest.current
-    props.run({ action: 'memory', projectId: project.id }).then((result) => {
-      if (ticket !== latest.current) return
-      if (!result.memory) throw new Error(t('kgNoResponse'))
-      setPage(result.memory)
-      setError('')
-    }).catch((reason: unknown) => {
-      if (ticket === latest.current) setError(reason instanceof Error ? reason.message : String(reason))
-    })
-    return () => { latest.current++ }
-  }, [project.id, project.revision])
+  useEffect(() => loadResearchPage({
+    latest, request: () => props.run({ action: 'memory', projectId: project.id }),
+    field: 'memory', missingResponse: () => t('kgNoResponse'), setPage, setError,
+  }), [project.id, project.revision])
   const flip = (kind: MemoryKind, on: boolean): void => {
     switching.start(async () => {
       const result = await props.run({ action: 'memory-carry', projectId: project.id, kind, on })

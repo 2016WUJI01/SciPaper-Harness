@@ -52,12 +52,13 @@ describe('message revisions', () => {
   })
 
   it('can revise the first event and refuses empty text-only or non-human revisions', () => {
-    const original = createUserMessage({ content: [{ type: 'text', text: 'First' }], source: { kind: 'user' } })
+    const original = createUserMessage({ content: [{ type: 'text', text: 'First' }], source: { kind: 'user', clientTimeZone: 'Asia/Shanghai' } })
     const events: SessionEvent[] = [{ type: 'user/message', seq: SessionSeq(0), time: 1, surfaceOp: 'append', data: original }]
     const revision = prepareMessageRevision(events, { messageSeq: 0, text: 'Replacement' })
     expect(revision.inheritedEventCount).toBe(0)
     expect(revision.seed).toEqual([{ type: 'session/end-seed', seq: 0, time: 1, data: { inherited: true } }])
     expect(revision.message.id).not.toBe(original.id)
+    expect(revision.message.source).toMatchObject({ kind: 'user', clientTimeZone: 'Asia/Shanghai' })
     expect(() => prepareMessageRevision(events, { messageSeq: 0, text: '  ' })).toThrow('text or an attachment')
     for (const messageSeq of [-1, 0.5, 1, NaN]) expect(() => prepareMessageRevision(events, { messageSeq })).toThrow('human message')
     expect(() => prepareMessageRevision([{ type: 'turn/start', seq: SessionSeq(0), time: 1, data: { turn: 1 } }], { messageSeq: 0 })).toThrow('human message')

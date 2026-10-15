@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import type { PresetDefinition } from '@deepseek-ai/dsh-agent-preset-registry'
 import type { CredentialKey, CredentialRecord } from '@deepseek-ai/dsh-credentials'
@@ -34,7 +34,7 @@ function records(): PasswordRecords {
       if (next !== undefined) stored.set(key, next)
       return next
     },
-    deleteRecord: (key) => { stored.delete(key); return Promise.resolve() },
+    deleteRecord: (key) => { stored.delete(key); return Promise.resolve(undefined) },
   }
 }
 
@@ -58,7 +58,8 @@ async function setup(broken?: string, researchTools = true, credentials?: Passwo
   }
   ctx.effect(() => ctx.reflect.provide('agentPresets', registry))
   const fiber = await ctx.plugin(RemoteWorkspacePresets, { researchTools })
-  return { ctx, fiber, definitions, unregistered }
+  onTestFinished(() => fiber.dispose())
+  return { ctx, fiber, definitions, unregistered, registry }
 }
 
 describe('remote workspace preset', () => {
@@ -263,5 +264,87 @@ describe('remote workspace login choice', () => {
     const bare = await setup()
     await expect(bare.ctx.remoteWorkspacePresets.forget(request.host)).resolves.toBeUndefined()
     await bare.fiber.dispose()
+  })
+})
+
+
+describe('remote workspace activation lifetime', () => {
+  const request = { host: 'campus', path: '/srv/input' }
+  const runtime = {
+    node: '/usr/bin/node', helper: '/opt/dsh/helper.mjs', helperHash: 'a'.repeat(64),
+    canonicalPath: '/srv/research', typescriptLanguageServer: '/opt/lsp/cli.mjs',
+  }
+
+  it('omits remote search when provisioning found no ripgrep executable', async () => {
+    const { ctx, definitions } = await setup()
+    vi.mocked(provisionRemoteWorkspace).mockResolvedValueOnce(runtime)
+    await ctx.remoteWorkspacePresets.inspect(request)
+    const rows = definitions[0]?.plugins[0]?.config as Array<{ id: string }>
+    expect(rows.map(row => row.id)).not.toContain('tool-fs-search')
+  })
+
+  it('rejects new work after disposal before starting SSH', async () => {
+    const { ctx, fiber } = await setup()
+    const service = ctx.remoteWorkspacePresets
+    await fiber.dispose()
+    await expect(service.inspect(request)).rejects.toThrow('service is closed')
+    expect(provisionRemoteWorkspace).not.toHaveBeenCalled()
+  })
+
+  it('joins two path spellings that resolve to the same pending preset activation', async () => {
+    const { ctx, registry, definitions } = await setup()
+    const registered = Promise.withResolvers<undefined>()
+    const release = Promise.withResolvers<undefined>()
+    const original = registry.register
+    vi.spyOn(registry, 'register').mockImplementation(async (definition) => {
+      registered.resolve(undefined)
+      await release.promise
+      return original(definition)
+    })
+    const first = ctx.remoteWorkspacePresets.inspect(request)
+    await registered.promise
+    const second = ctx.remoteWorkspacePresets.inspect({ ...request, path: '/srv/alias' })
+    try {
+      await expect.poll(() => vi.mocked(provisionRemoteWorkspace).mock.calls.length).toBe(2)
+    } finally { release.resolve(undefined) }
+    expect(await second).toEqual(await first)
+    expect(registry.register).toHaveBeenCalledOnce()
+    expect(definitions).toHaveLength(1)
+  })
+
+  it.each(['setup', 'activation', 'verification'] as const)('joins shutdown during %s and unregisters any activated preset', async (stage) => {
+    const { ctx, fiber, registry, unregistered } = await setup()
+    const entered = Promise.withResolvers<undefined>()
+    const release = Promise.withResolvers<undefined>()
+    if (stage === 'setup') {
+      vi.mocked(provisionRemoteWorkspace).mockImplementationOnce(async () => {
+        entered.resolve(undefined)
+        await release.promise
+        return runtime
+      })
+    } else if (stage === 'activation') {
+      const original = registry.register
+      vi.spyOn(registry, 'register').mockImplementation(async (definition) => {
+        const unregister = await original(definition)
+        entered.resolve(undefined)
+        await release.promise
+        return unregister
+      })
+    } else {
+      const original = registry.resolve
+      vi.spyOn(registry, 'resolve').mockImplementation(async (id) => {
+        entered.resolve(undefined)
+        await release.promise
+        return original(id)
+      })
+    }
+    const pending = ctx.remoteWorkspacePresets.inspect(request)
+    const rejected = expect(pending).rejects.toThrow(`closed during ${stage === 'setup' ? 'SSH setup' : `preset ${stage}`}`)
+    await entered.promise
+    const disposal = fiber.dispose()
+    release.resolve(undefined)
+    await rejected
+    await disposal
+    expect(unregistered).toHaveLength(stage === 'setup' ? 0 : 1)
   })
 })

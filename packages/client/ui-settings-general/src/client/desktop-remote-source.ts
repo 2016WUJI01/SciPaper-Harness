@@ -1,6 +1,7 @@
 /** Observes the desktop-only remote lease without persisting pairing secrets. */
 import { createSnapshotStore } from '@deepseek-ai/dsh-client-store'
 import type { DesktopRemoteBridge, DesktopRemotePresentation } from '../types.ts'
+import { observeDesktopStatus } from './desktop-status-observer.ts'
 
 /** Carrier presentation plus a local failed action and refresh state. */
 export interface DesktopRemoteView {
@@ -14,18 +15,12 @@ export class DesktopRemoteSource {
   /** Current carrier presentation and action state for subscribed settings views. */
   readonly store = createSnapshotStore<DesktopRemoteView>({ presentation: { phase: 'idle' }, failed: false, refreshing: false })
   private live = true
-  private received = false
   private readonly unsubscribe: () => void
 
   constructor(private readonly bridge: DesktopRemoteBridge) {
-    this.unsubscribe = bridge.subscribe((presentation) => {
-      if (!this.live) return
-      this.received = true
-      this.store.set({ ...this.store.getSnapshot(), presentation, failed: false })
+    this.unsubscribe = observeDesktopStatus(bridge, () => this.live, (patch) => {
+      this.store.set({ ...this.store.getSnapshot(), ...patch })
     })
-    void bridge.status().then((presentation) => {
-      if (this.live && !this.received) this.store.set({ ...this.store.getSnapshot(), presentation })
-    }, () => { if (this.live && !this.received) this.store.set({ ...this.store.getSnapshot(), failed: true }) })
   }
 
   /**

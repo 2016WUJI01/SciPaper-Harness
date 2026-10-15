@@ -1,5 +1,6 @@
 - banner:
   - navigation "Session hierarchy": Use only Cordis tools. First
+  - button "Stop all"
   - button "More actions"
   - button "Open right sidebar"
   - tablist:
@@ -11,6 +12,8 @@
   - button "Jump to turn 3"
 - text: "Use only Cordis tools. First call cordis_inspect_self with no arguments. Then call cordis_define with plugin kind \"new\", idPrefix \"snap\", name \"snapshot noop\", purpose \"does nothing, for the snapshot\", code.host exactly \"return { name: \\\"snapshot-noop\\\", apply(ctx) {} }\" and code.client exactly \"return { inject: [\\\"slots\\\"], apply(ctx) { ctx.slots.register({ name: \\\"shell.overlay\\\", id: \\\"snapshot-probe\\\" }, () => React.createElement(\\\"div\\\", { \\\"data-snapshot-probe\\\": \\\"loaded\\\" })) } }\". Read its returned pluginId and packageId, then call cordis_run with those exact IDs and mode \"run\". After the run request returns, reply exactly CORDIS_UI_READY and stop. 9/1 {{clock}}"
 - button "Copy"
+- button "Edit and resend"
+- button "Resend"
 - status: Completed
 - button "Completed in {{duration}}" [expanded]
 - button "Called tools" [expanded]
@@ -51,6 +54,8 @@
 - button "Continue from here"
 - text: 9/1 {{clock}} Use only Cordis tools. Call cordis_stop with pluginId "snap-1". After it succeeds, reply exactly CORDIS_UI_DONE and stop. 9/1 {{clock}}
 - button "Copy"
+- button "Edit and resend"
+- button "Resend"
 - status: Completed
 - button "Completed in {{duration}}" [expanded]
 - button "Called tools" [expanded]
@@ -64,7 +69,7 @@
 - button "Continue from here"
 - text: 9/1 {{clock}}
 - button "Back to bottom"
-- textbox "Message or run a task, / commands, @ files or sessions"
+- textbox "Keep going, or drop in papers and data; / for commands, @ for files or conversations"
 - button "Add files or run commands"
 - 'button "Access mode, current: Workspace Write"': Workspace Write
 - button "Select model, current DeepSeek-V4-Flash": DeepSeek-V4-Flash

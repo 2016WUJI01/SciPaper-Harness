@@ -1,6 +1,6 @@
-- button "新建会话"
+- button "新对话"
 - button "收起侧边栏"
-- button "新建会话": 新会话
+- button "新对话"
 - navigation "全局面板":
   - button "插件"
 - text: 工作区
@@ -14,10 +14,10 @@
 - button "设置"
 - banner:
   - button "打开右侧边栏"
-- text: 探索未至之境 预览版
-- button "选择工作区": workspace
+- text: 今天想推进什么？
+- button "选择项目": workspace
 - button "标准模式"
-- textbox "描述你想要构建的内容, / 调用指令, @ 文件或对话"
+- textbox "说说你的研究问题，或把论文、数据拖进来（/ 调用指令，@ 引用文件或对话）"
 - button "添加文件或调用指令"
 - button "访问模式，当前：工作区内修改": 工作区内修改
 - button "计划模式已开启，按下关闭": 计划

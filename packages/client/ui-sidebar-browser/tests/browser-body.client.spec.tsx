@@ -304,3 +304,25 @@ describe('BrowserBody', () => {
   })
 
 })
+
+
+it('shows a site-data clearing failure and permits a confirmed retry', async () => {
+  const snapshot = createSnapshotStore<BrowserFrameState>(emptyBrowserFrame())
+  const clear = vi.fn().mockRejectedValueOnce(new Error('storage in use')).mockResolvedValueOnce(undefined)
+  const native = mountBrowser(undefined, { createPage: () => ({
+    presentation: { mount: () => () => {} },
+    frame: {
+      getSnapshot: () => snapshot.getSnapshot(), subscribe: listener => snapshot.subscribe(listener),
+      loadUrl: vi.fn(), goBack: vi.fn(), goForward: vi.fn(), reload: vi.fn(), dispose: async () => {},
+      clearWorkspaceData: clear,
+    },
+  }) })
+  fireEvent.click(native.view.getByRole('button', { name: zh['siteData.clear'] }))
+  fireEvent.click(native.view.getAllByRole('button', { name: zh['siteData.clear'] })[1]!)
+  expect((await native.view.findByRole('alert')).textContent).toBe(zh['siteData.failed'])
+  expect(native.view.getByText(zh['siteData.confirm'])).toBeTruthy()
+  fireEvent.click(native.view.getAllByRole('button', { name: zh['siteData.clear'] })[1]!)
+  await waitFor(() => { expect(native.view.queryByText(zh['siteData.confirm'])).toBeNull() })
+  expect(native.view.queryByRole('alert')).toBeNull()
+  expect(clear).toHaveBeenCalledTimes(2)
+})

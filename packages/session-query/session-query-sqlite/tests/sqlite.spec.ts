@@ -1044,6 +1044,25 @@ describe('SQLite reconciliation and source lifecycle', () => {
     expect(TestPersistence.reads.get(added.id)).toBe(1)
   })
 
+  it('retries an SSH observation when its execution host changes while loading', async () => {
+    const durable = header('remote-host-change', 1, { execution: { kind: 'ssh', host: 'gpu-a' } })
+    TestPersistence.reset([{ meta: durable, events: messageEvents('remote needle') }])
+    const ctx = await liveContext()
+    try {
+      await ctx.plugin(TestPersistence)
+      const changed = { ...durable, execution: { kind: 'ssh' as const, host: 'gpu-b' } }
+      TestPersistence.readEffect = () => {
+        TestPersistence.entries.set(durable.id, { meta: changed, events: messageEvents('remote needle') })
+      }
+      await expect(ctx.sessionQuery.searchSessions({ query: 'needle' }))
+        .resolves.toMatchObject({ items: [{ header: changed }] })
+      expect(TestPersistence.reads.get(durable.id)).toBe(2)
+      await expect(ctx.sessionQuery.searchSessions({ query: 'needle' }))
+        .resolves.toMatchObject({ items: [{ header: changed }] })
+      expect(TestPersistence.reads.get(durable.id)).toBe(2)
+    } finally { await ctx.fiber.dispose() }
+  })
+
   it('fails after one retry when persistence snapshots keep changing', async () => {
     const durable = header('continuous-mutation')
     TestPersistence.reset([{ meta: durable, events: messageEvents('durable needle') }])

@@ -1,15 +1,28 @@
 /** What the browser half registers, when, which credential it watches, and that it all leaves with the fiber. */
 
 import { Context } from '@deepseek-ai/cordis'
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, onTestFinished, vi } from 'vitest'
 import { resolveSlotLabel } from '@deepseek-ai/dsh-client-ui-slots'
 import { SlotRegistry } from '@deepseek-ai/dsh-client-ui-renderer/client'
 import { RemoteError, TestRemote } from '@deepseek-ai/dsh-client-test-runtime'
 import { LocaleRuntime } from '@deepseek-ai/dsh-client-locale/client'
 import { apply as settingsApply, inject as settingsInject } from '@deepseek-ai/dsh-client-ui-settings/client'
 import { apply, inject, NS } from '../src/client/index.ts'
+import type { SearchCredentialFace } from '../src/client/OptionalSearchBackend.tsx'
 import type { WebSearchCardFace } from '../src/client/index.ts'
 import { apply as hostApply } from '../src/index.ts'
+import type { StoredEntry } from '@deepseek-ai/dsh-client-ui-slots'
+
+/** Optional backend contributions share this concrete credential face. */
+interface SearchCredentialEntry extends StoredEntry {
+  inject: () => SearchCredentialFace & Record<string, unknown>
+}
+
+function credentialFace(entry: StoredEntry | undefined): SearchCredentialFace {
+  const credentialEntry = entry as SearchCredentialEntry | undefined
+  if (credentialEntry?.inject === undefined) throw new Error('credential entry registered no inject face')
+  return credentialEntry.inject()
+}
 
 /** One Host view of a served namespace. */
 function view(ns: string, revision = 0) {
@@ -106,4 +119,47 @@ describe('ui-settings-web-search apply', () => {
 
     expect(slots.entries('plugins.item')).toHaveLength(0)
   })
+})
+
+
+it('wires optional bundle credentials and subscriptions through the shared remote, including unavailable providers', async () => {
+  const { ctx, slots, remote } = await bench()
+  onTestFinished(async () => { await ctx.fiber.dispose() })
+  slots.register({ name: 'root', children: {
+    'plugins.bundle.config': { kind: 'keyed', scope: 'root' },
+    'plugins.detail.badge': { kind: 'list', scope: 'root' },
+  } } as never, () => null)
+  const fiber = ctx.plugin({ inject: [...inject], apply })
+  await fiber.await()
+  const configEntries = slots.entries('plugins.bundle.config')
+  expect(configEntries.map(entry => entry.options.key)).toEqual([
+    '@deepseek-ai/dsh-web-search-exa-bundle', '@deepseek-ai/dsh-web-search-perplexity-bundle',
+  ])
+  const face = credentialFace(configEntries[0])
+  const badgeFace = credentialFace(slots.entries('plugins.detail.badge')[0])
+  expect(badgeFace.readCredential).toBe(face.readCredential)
+  const describe = vi.spyOn(ctx.remote.credentials, 'describe')
+  describe.mockResolvedValueOnce({ ok: false, error: new RemoteError('gateway/internal', 'unavailable', {}) })
+  await expect(face.readCredential('EXA_API_KEY')).resolves.toBeUndefined()
+  describe.mockResolvedValueOnce({ ok: true, value: {} })
+  await expect(face.readCredential('EXA_API_KEY')).resolves.toEqual({ configured: false, writable: true })
+  describe.mockResolvedValueOnce({ ok: true, value: { EXA_API_KEY: { configured: true, writable: false } } })
+  await expect(face.readCredential('EXA_API_KEY')).resolves.toEqual({ configured: true, writable: false })
+  expect(describe).toHaveBeenLastCalledWith(['EXA_API_KEY'])
+  const set = vi.spyOn(ctx.remote.credentials, 'set')
+  set.mockResolvedValueOnce({ ok: true, value: undefined })
+  await expect(face.writeCredential('EXA_API_KEY', 'fixture-key')).resolves.toBeUndefined()
+  expect(set).toHaveBeenCalledWith('EXA_API_KEY', 'fixture-key')
+  set.mockResolvedValueOnce({ ok: false, error: new RemoteError('gateway/internal', 'read only', {}) })
+  await expect(face.writeCredential('EXA_API_KEY', 'fixture-key')).rejects.toThrow('credential write was refused')
+  const changed = vi.fn()
+  const off = face.onCredentialChanged(changed)
+  remote.emit('credentials/reference-updated', ['EXA_API_KEY'])
+  expect(changed).toHaveBeenCalledExactlyOnceWith('EXA_API_KEY')
+  off()
+  remote.emit('credentials/reference-updated', ['EXA_API_KEY'])
+  expect(changed).toHaveBeenCalledOnce()
+  await fiber.dispose()
+  expect(slots.entries('plugins.bundle.config')).toHaveLength(0)
+  expect(slots.entries('plugins.detail.badge')).toHaveLength(0)
 })

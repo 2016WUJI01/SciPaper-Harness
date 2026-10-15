@@ -203,6 +203,7 @@
             "job_kill",
             "job_list",
             "job_output",
+            "job_stop_all",
             "run_code",
             "snapshot_double",
             "subagent",
@@ -299,6 +300,7 @@
             "job_kill",
             "job_list",
             "job_output",
+            "job_stop_all",
             "run_code",
             "snapshot_double",
             "subagent",
@@ -314,7 +316,7 @@
       "time": 0,
       "data": {
         "sessionId": "{{parent}}",
-        "sessionFormatVersion": 4,
+        "sessionFormatVersion": 5,
         "throughSeq": 19
       }
     },
@@ -542,7 +544,7 @@
       "time": 0,
       "data": {
         "sessionId": "{{parent}}",
-        "sessionFormatVersion": 4,
+        "sessionFormatVersion": 5,
         "throughSeq": 27
       }
     },
@@ -740,7 +742,7 @@
       "time": 0,
       "data": {
         "sessionId": "{{parent}}",
-        "sessionFormatVersion": 4,
+        "sessionFormatVersion": 5,
         "throughSeq": 33
       }
     },
@@ -973,7 +975,7 @@
       "time": 0,
       "data": {
         "sessionId": "{{parent}}",
-        "sessionFormatVersion": 4,
+        "sessionFormatVersion": 5,
         "throughSeq": 41
       }
     },
@@ -1178,7 +1180,7 @@
       "time": 0,
       "data": {
         "sessionId": "{{parent}}",
-        "sessionFormatVersion": 4,
+        "sessionFormatVersion": 5,
         "throughSeq": 48
       }
     },
@@ -1422,7 +1424,7 @@
       "time": 0,
       "data": {
         "sessionId": "{{parent}}",
-        "sessionFormatVersion": 4,
+        "sessionFormatVersion": 5,
         "throughSeq": 59
       }
     },
@@ -1908,6 +1910,7 @@
                 "job_kill",
                 "job_list",
                 "job_output",
+                "job_stop_all",
                 "run_code",
                 "snapshot_double",
                 "subagent",
@@ -2034,6 +2037,7 @@
                 "job_kill",
                 "job_list",
                 "job_output",
+                "job_stop_all",
                 "run_code",
                 "snapshot_double",
                 "subagent",
@@ -2055,7 +2059,7 @@
           "time": 0,
           "data": {
             "sessionId": "{{parent}}",
-            "sessionFormatVersion": 4,
+            "sessionFormatVersion": 5,
             "throughSeq": 19
           }
         }
@@ -2331,7 +2335,7 @@
           "time": 0,
           "data": {
             "sessionId": "{{parent}}",
-            "sessionFormatVersion": 4,
+            "sessionFormatVersion": 5,
             "throughSeq": 27
           }
         }
@@ -2565,7 +2569,7 @@
           "time": 0,
           "data": {
             "sessionId": "{{parent}}",
-            "sessionFormatVersion": 4,
+            "sessionFormatVersion": 5,
             "throughSeq": 33
           }
         }
@@ -2846,7 +2850,7 @@
           "time": 0,
           "data": {
             "sessionId": "{{parent}}",
-            "sessionFormatVersion": 4,
+            "sessionFormatVersion": 5,
             "throughSeq": 41
           }
         }
@@ -3316,6 +3320,7 @@
                 "job_kill",
                 "job_list",
                 "job_output",
+                "job_stop_all",
                 "run_code",
                 "snapshot_double",
                 "subagent",
@@ -3373,7 +3378,7 @@
           "time": 0,
           "data": {
             "sessionId": "{{child-1}}",
-            "sessionFormatVersion": 4,
+            "sessionFormatVersion": 5,
             "throughSeq": 16
           }
         }
@@ -3624,7 +3629,7 @@
           "time": 0,
           "data": {
             "sessionId": "{{parent}}",
-            "sessionFormatVersion": 4,
+            "sessionFormatVersion": 5,
             "throughSeq": 48
           }
         }
@@ -4125,6 +4130,7 @@
                 "job_kill",
                 "job_list",
                 "job_output",
+                "job_stop_all",
                 "run_code",
                 "snapshot_double",
                 "subagent",
@@ -4182,7 +4188,7 @@
           "time": 0,
           "data": {
             "sessionId": "{{child-2}}",
-            "sessionFormatVersion": 4,
+            "sessionFormatVersion": 5,
             "throughSeq": 16
           }
         }
@@ -4464,7 +4470,7 @@
           "time": 0,
           "data": {
             "sessionId": "{{parent}}",
-            "sessionFormatVersion": 4,
+            "sessionFormatVersion": 5,
             "throughSeq": 59
           }
         }

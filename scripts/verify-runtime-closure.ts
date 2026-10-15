@@ -73,13 +73,6 @@ export async function verifyRuntimeClosure(
     if (packageName === undefined) continue
     const current = workspace.get(packageName)
     if (current === undefined) continue
-    const peers = current.manifest.peerDependencies ?? {}
-    const peerMeta = current.manifest.peerDependenciesMeta ?? {}
-    for (const peer of Object.keys(peers).sort()) {
-      if (!workspace.has(peer) || peerMeta[peer]?.optional === true) continue
-      if (runtimeDependencies[peer]?.startsWith('workspace:') === true) continue
-      failures.push(`${formatChain(runtimeName, packageName, parents)} -> ${peer}`)
-    }
     const dependencies = {
       ...current.manifest.dependencies,
       ...current.manifest.optionalDependencies,
@@ -88,6 +81,19 @@ export async function verifyRuntimeClosure(
       if (!workspace.has(dependency) || parents.has(dependency)) continue
       parents.set(dependency, packageName)
       queue.push(dependency)
+    }
+  }
+
+  // The deploy repair materializes transitive dependencies in the same flat
+  // installation, so any required dependency edge may supply a shared peer.
+  for (const packageName of queue) {
+    const current = workspace.get(packageName)
+    if (current === undefined) continue
+    const peers = current.manifest.peerDependencies ?? {}
+    const peerMeta = current.manifest.peerDependenciesMeta ?? {}
+    for (const peer of Object.keys(peers).sort()) {
+      if (!workspace.has(peer) || peerMeta[peer]?.optional === true || parents.has(peer)) continue
+      failures.push(`${formatChain(runtimeName, packageName, parents)} -> ${peer}`)
     }
   }
 
@@ -201,7 +207,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 async function loadWorkspacePackages(root: string): Promise<Map<string, WorkspacePackage>> {
-  const paths = globSync(['packages/*/*/package.json', 'vendor/*/package.json'], { cwd: root })
+  const paths = globSync(['apps/*/package.json', 'packages/*/*/package.json', 'vendor/*/package.json'], { cwd: root })
     .sort()
     .map(relative => resolve(root, relative))
   const result = new Map<string, WorkspacePackage>()

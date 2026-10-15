@@ -47,8 +47,8 @@ describe('web e2e: startup auto-selection', () => {
     const fishHitbox = headline.locator('xpath=../preceding-sibling::span[1]')
     const fish = fishHitbox.locator('svg')
     expect(await fish.evaluate(node => getComputedStyle(node).color))
-      .toBe('rgb(21, 99, 95)')
-    expect(await headline.evaluate(node => getComputedStyle(node).color)).toBe('rgb(28, 28, 25)')
+      .toBe('rgb(15, 17, 21)')
+    expect(await headline.evaluate(node => getComputedStyle(node).color)).toBe('rgb(15, 17, 21)')
     await fishHitbox.hover()
     expect(await fish.evaluate(node => getComputedStyle(node).animationName)).not.toBe('none')
     await page.evaluate(() => {

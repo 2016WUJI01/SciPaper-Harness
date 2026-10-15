@@ -1,5 +1,7 @@
 - text: 简单画一个 SVG 表示冯诺依曼架构, 保存为 von-neumann.svg {{clock}}
 - button "复制"
+- button "编辑并重发"
+- button "重发"
 - status: 已完成
 - button "已完成，用时 {{duration}}" [expanded]
 - button "已完成分析" [expanded]
@@ -38,6 +40,6 @@
 - button "复制"
 - button "好的回答"
 - button "有问题的回答"
-- button "在新对话中分支"
+- button "回到此处继续"
 - button "用量 32K tok"
 - text: {{clock}}

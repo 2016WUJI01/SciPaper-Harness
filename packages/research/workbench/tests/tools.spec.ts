@@ -11,6 +11,7 @@ import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
 import type { PreToolDecision, ToolExecution } from '@deepseek-ai/dsh-tools'
 import { attachedFilesDirectory } from '../src/files.ts'
+import * as researchFiles from '../src/files.ts'
 import { projectBrief, registerResearchTools } from '../src/tools.ts'
 import { RELATION_GROUNDING_RULE } from '../src/knowledge-relations-grounding.ts'
 import { newProject } from '../src/project.ts'
@@ -42,7 +43,7 @@ type PreExecute = (exec: ToolExecution, next: () => Promise<PreToolDecision>) =>
 const root = process.platform === 'win32' ? 'C:\\research\\study' : '/research/study'
 const other = process.platform === 'win32' ? 'C:\\research\\other' : '/research/other'
 
-function harness() {
+function harness(modules?: Parameters<typeof registerResearchTools>[2], knowledgeEnabled = true) {
   const project = newProject({ root, title: 'Study', brief: 'b', mode: 'spark-to-paper', route: 'proposal' }, 'w' as WorkspaceId)
   const foreign = newProject({ root: other, title: 'Other', brief: '' }, 'w' as WorkspaceId)
   const executed: { request: ResearchCommand; actor: string; sessionId?: string | undefined }[] = []
@@ -54,7 +55,7 @@ function harness() {
     { id: 'global', kind: 'install', status: 'completed', message: 'ok', createdAt: '' },
   ]
   const service = {
-    knowledgeEnabled: true,
+    knowledgeEnabled,
     projects: () => [project, foreign],
     getProject: (id: ProjectId) => { const found = [project, foreign].find(item => item.id === id); if (!found) throw new Error('Research project not found'); return found },
     projectAt: async (cwd: string) => cwd.startsWith(root) ? project : cwd.startsWith(other) ? foreign : undefined,
@@ -74,7 +75,7 @@ function harness() {
     tools: { register: (tool: RegisteredTool) => { tools.set(tool.name, tool) } },
     on: (name: string, listener: PreExecute) => { if (name === 'tools/pre-execute') hook = listener },
   } as unknown as Context
-  registerResearchTools(ctx, service)
+  registerResearchTools(ctx, service, modules)
   const exec = (cwd: string | undefined, name = 'research_project', execution?: { kind: 'ssh'; host: string }) => ({
     name, signal: new AbortController().signal,
     ...(cwd === undefined ? {} : { agent: { session: { id: 'agent-session', header: { cwd, ...(execution === undefined ? {} : { execution }) } } } }),
@@ -207,6 +208,59 @@ describe('research tools find the project from the working directory', () => {
     expect(ambiguous.project).toBeNull()
     expect(ambiguous.hint).toMatch(/Multiple research projects/)
     await expect(h.call('research_check', {}, '/srv/study/code', execution)).rejects.toThrow(/Multiple research projects/)
+  })
+
+  it('accepts relative SSH-ledger paths and explicitly attached host files without treating them as remote files', async () => {
+    const h = harness(), home = await mkdtemp(join(tmpdir(), 'research-remote-attachments-'))
+    vi.stubEnv('DSH_HOME', home)
+    h.project.environments.push({
+      id: 'remote' as ResearchProject['environments'][number]['id'], name: 'Remote', kind: 'existing', target: 'ssh',
+      python: '/usr/bin/python3', sshHost: 'alpha', remoteRoot: '/srv/study', requirements: [],
+      fingerprint: 'test', status: 'ready', details: '', isDefault: false,
+    })
+    const execution = { kind: 'ssh' as const, host: 'alpha' }
+    try {
+      const attached = join(attachedFilesDirectory(home), 'ab', 'ab12cd', 'paper.tex')
+      await mkdir(join(attached, '..'), { recursive: true })
+      await writeFile(attached, 'Attached manuscript')
+      await h.call('research_evidence', { action: 'import', paths: [attached, 'relative.csv'] }, '/srv/study', execution)
+      await h.call('research_artifact', { action: 'import-template', paths: [attached] }, '/srv/study', execution)
+      await h.call('research_knowledge', { action: 'novelty', claim: 'A claim', references: [{ title: 'Study', text: 'Evidence' }] }, '/srv/study', execution)
+      await expect(h.call('research_evidence', { action: 'import', paths: [7] }, '/srv/study', execution)).rejects.toThrow()
+      expect(h.executed.map(item => item.request.action)).toEqual(['import', 'import-template', 'novelty'])
+    } finally { vi.unstubAllEnvs(); await rm(home, { recursive: true }) }
+  })
+
+  it('checks absolute POSIX imports against the host attachment store in an SSH conversation', async () => {
+    const h = harness()
+    h.project.environments.push({
+      id: 'remote' as ResearchProject['environments'][number]['id'], name: 'Remote', kind: 'existing', target: 'ssh',
+      python: '/usr/bin/python3', sshHost: 'alpha', remoteRoot: '/srv/study', requirements: [],
+      fingerprint: 'test', status: 'ready', details: '', isDefault: false,
+    })
+    const execution = { kind: 'ssh' as const, host: 'alpha' }
+    // Remote paths stay POSIX even when this test runs on a Windows host.
+    const attached = '/host/attachments/paper.tex', remote = '/srv/study/private.tex'
+    const attachment = vi.spyOn(researchFiles, 'isAttachment').mockImplementation(async path => path === attached)
+    try {
+      await h.call('research_evidence', { action: 'import', paths: [attached] }, '/srv/study', execution)
+      await h.call('research_artifact', { action: 'import-template', paths: [attached] }, '/srv/study', execution)
+      await expect(h.call('research_artifact', { action: 'import-template', paths: [remote] }, '/srv/study', execution))
+        .rejects.toThrow(/project-relative paths/)
+      expect(attachment.mock.calls.map(([path]) => path)).toEqual([attached, attached, remote])
+      expect(h.executed.map(item => item.request.action)).toEqual(['import', 'import-template'])
+    } finally { attachment.mockRestore() }
+  })
+
+  it('registers no tools for an empty module selection and gives disabled-graph guidance', async () => {
+    const empty = harness([])
+    expect(empty.tools.size).toBe(0)
+    const h = harness(undefined, false)
+    const brief = await h.call('research_project', { action: 'current' })
+    expect(brief).toHaveProperty('capabilities.knowledgeGraph', false)
+    expect(brief).toHaveProperty('guide', expect.arrayContaining([
+      'Knowledge graph is disabled. Skip graph steps in mode skills; continue with research_evidence and web search, stating the evidence basis.',
+    ]))
   })
 
   it('reports the current project with its route, autonomy guidance and phases', async () => {
@@ -551,6 +605,22 @@ describe('the project brief the model reads', () => {
     const rerouted = await brief() as { guide: string[]; phases: { missing: string[] }[] }
     expect(rerouted.guide[0]).toMatch(/ Next phase: story\./)
     expect(rerouted.phases[0]?.missing).toEqual(['Not checked yet'])
+  })
+
+  it('identifies the shipped example as read-only in both its brief and guidance', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'research-example-brief-'))
+    vi.stubEnv('DSH_HOME', home)
+    try {
+      const project = newProject({ root: join(home, 'research/examples/v1/alpha'), title: 'Example', brief: '' }, 'w' as WorkspaceId)
+      const mode = modes.resolve(project)
+      const brief = projectBrief(project, mode, await standingOf(project, mode))
+      if (brief === null || typeof brief !== 'object' || Array.isArray(brief)) throw new Error('Expected a research project brief object')
+      expect(brief.example).toBe(true)
+      expect(brief.guide).toContain(
+        'This is an example research shipped with the app, and it is read-only: explain how it was made and change nothing. '
+        + 'For the person\'s own work, suggest 新研究 (New research).',
+      )
+    } finally { vi.unstubAllEnvs(); await rm(home, { recursive: true }) }
   })
 
   it('names the skills a pack loads first, and a pack route without phases', async () => {

@@ -60,6 +60,8 @@ await ctx.credentials.unset(ref)                       // no-op when absent; sam
 
 Store a key with `set`, remove it with `unset`, check its status with `describe`, and read the current value with `resolve` when an operation needs it. `describe` reports whether the key is set, where it comes from, and whether you can write to it — it never returns the value.
 
+`providerApiKeyOptions(ctx, configured, environmentName, readEnvironment)` assembles provider options such as those used by Exa and Perplexity. It samples a literal or volatile key once, lazily reads the consumer-owned environment fallback only when that value is absent, and otherwise uses an empty key. An explicit empty string suppresses the environment fallback. When a credential provider is mounted, the returned `resolveApiKey` validates the reference and reads its current managed value on every invocation; missing values and provider failures remain visible to the caller.
+
 ### Storing, updating, and removing records
 
 A plugin addresses each record by `<scope>/<id>` — its own registered name plus an id it chooses, such as a provider route key — and reads, modifies, or removes what it holds:

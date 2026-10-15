@@ -108,10 +108,10 @@ it('lists, resolves and loads packaged research and mode skills with workspace-w
     ['@deepseek-ai/dsh-research-workbench/mode-skills', ModeSkills],
   ])
   if (context.loader.internal === undefined) throw new Error('Loader has no module resolver')
-  context.loader.internal.import = async (name: string) => {
+  vi.spyOn(context.loader.internal, 'import').mockImplementation(async (name: string) => {
     if (!modules.has(name)) throw new Error(`Unmapped composition module: ${name}`)
     return modules.get(name)
-  }
+  })
   await context.loader.create({ name: 'cordis:include', config: { path: pathToFileURL(path).href } })
   await context.loader.await()
   const caller = agent(root)

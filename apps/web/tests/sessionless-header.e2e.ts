@@ -37,7 +37,7 @@ describe('navigation without a selected Session', () => {
       }
       const tripwire = watchConsole(page)
       await page.goto(scaffold.authenticatedUrl, { waitUntil: 'load' })
-      await page.getByRole('textbox', { name: 'Choose workspace', exact: true }).waitFor()
+      await page.getByRole('textbox', { name: 'Choose project', exact: true }).waitFor()
       const sessionHeader = page.locator('[data-slot="conversation.session.header"]')
       expect(await sessionHeader.count()).toBe(0)
       const header = page.locator('[data-slot="conversation.header"] > header')
@@ -50,7 +50,7 @@ describe('navigation without a selected Session', () => {
       expect(await sessionHeader.count()).toBe(0)
       expect(await header.evaluate(element => element.getBoundingClientRect().height)).toBe(platform === 'darwin' ? 40 : 0)
       if (platform === 'darwin') {
-        expect(await page.locator('[data-shell-leading]').getByRole('button', { name: 'New session', exact: true }).isVisible()).toBe(true)
+        expect(await page.locator('[data-shell-leading]').getByRole('button', { name: 'New conversation', exact: true }).isVisible()).toBe(true)
       }
       // The open label precedes both the column slide and the rail's mount animation.
       // Reverse the pointer action only after the rendered sidebar has settled.

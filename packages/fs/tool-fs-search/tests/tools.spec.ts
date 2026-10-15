@@ -13,7 +13,7 @@
 import { describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import { createScope, type Scope } from '@deepseek-ai/dsh-scope'
-import { join, sep } from 'node:path'
+import { dirname, join, resolve, sep } from 'node:path'
 import { createUserMessage, ToolCallId } from '@deepseek-ai/dsh-llm'
 import type { ContextFormed } from '@deepseek-ai/dsh-llm'
 import SystemPrompt, { renderPrompt } from '@deepseek-ai/dsh-system-prompt'
@@ -322,6 +322,12 @@ describe('config validation', () => {
     await ctx.plugin(ToolRuntime)
     await ctx.plugin(FakeSubprocess)
     await expect(ctx.plugin(ToolFsSearch, { ...DEFAULT_CONFIG, ...config })).rejects.toThrow(new RegExp(`tool-fs-search: ${name} must be a positive integer`))
+  })
+
+  it('rejects a whitespace-only ripgrep executable before registering tools', async () => {
+    const ctx = new Context()
+    await expect(ToolFsSearch.apply(ctx, new ToolFsSearch.Config({ ...DEFAULT_CONFIG, rgPath: ' \t ' })))
+      .rejects.toThrow('tool-fs-search: rgPath must be non-empty')
   })
 
   it('rejects a grace beyond the Node timer range at load', async () => {
@@ -732,6 +738,15 @@ describe('cross-directory sampling', () => {
     })
   })
 
+  it.skipIf(process.platform === 'win32')('preserves backslashes while removing a POSIX search-root prefix', () => {
+    expect(sampleAcrossTopLevel(['root/old\\one', 'root/old\\two', 'root/src/a'], 2, 'root/'))
+      .toEqual({ items: ['root/old\\one', 'root/old\\two'], shown: 2, total: 3 })
+    expect(sampleAcrossTopLevel(['root\\one/a', 'root\\two/b', 'root/src/c'], 2, 'root'))
+      .toEqual({ items: ['root\\one/a', 'root\\two/b'], shown: 2, total: 3 })
+    expect(sampleAcrossTopLevel(['\\one/a', 'one/b'], 2, '/'))
+      .toEqual({ items: ['\\one/a', 'one/b'], shown: 2, total: 2 })
+  })
+
   it('handles more top-level groups than the JavaScript argument limit', () => {
     const paths = Array.from({ length: 125_000 }, (_, index) => `dir-${index}/file.txt`)
     expect(sampleAcrossTopLevel(paths, 100)).toMatchObject({ shown: 100, total: 125_000 })
@@ -744,8 +759,8 @@ describe('glob results', () => {
     subprocess.handler = () => runResult('/sessions/s1/src/a.ts\n/elsewhere/b.ts\nrel/c.ts\n')
     const result = await call(ctx, 'glob', { pattern: '*' }, { agent: agent('/sessions/s1') })
     if (result.isError) throw new Error('expected glob success')
-    expect(result.value).toEqual({ root: '.', paths: [join('src', 'a.ts'), '/elsewhere/b.ts', 'rel/c.ts'] })
-    expect(text(result)).toBe(`${join('src', 'a.ts')}\n/elsewhere/b.ts\nrel/c.ts`)
+    expect(result.value).toEqual({ root: '.', paths: ['src/a.ts', '/elsewhere/b.ts', 'rel/c.ts'] })
+    expect(text(result)).toBe('src/a.ts\n/elsewhere/b.ts\nrel/c.ts')
   })
 
   it('validates arguments (blank pattern, blank path)', async () => {
@@ -955,7 +970,7 @@ describe('grep results', () => {
     const { ctx, subprocess } = await setup()
     subprocess.handler = () => runResult(`${matchLine('/sessions/s1/deep/a.ts', 2, 'hit')}\n`)
     const result = await call(ctx, 'grep', { pattern: 'hit', path: '/sessions/s1' }, { agent: agent('/sessions/s1') })
-    expect(text(result)).toContain(`${join('deep', 'a.ts')}\nLine 2: hit`)
+    expect(text(result)).toContain('deep/a.ts\nLine 2: hit')
   })
 
   it('previews a long matched line at grepMaxLineBytes preserving UTF-8', async () => {
@@ -1196,6 +1211,16 @@ describe('presentation', () => {
 })
 
 describe('helpers', () => {
+  it('resolves native absolute output against relative working directories', () => {
+    const workdir = 'search-workspace'
+    const absolute = resolve(workdir)
+    const parent = dirname(absolute)
+    expect(toWorkdirRelative(absolute, workdir)).toBe('.')
+    expect(toWorkdirRelative(join(absolute, 'nested', 'file.ts'), workdir)).toBe(join('nested', 'file.ts'))
+    expect(toWorkdirRelative(parent, workdir)).toBe(parent)
+    expect(toWorkdirRelative(join(parent, 'sibling', 'file.ts'), workdir)).toBe(join(parent, 'sibling', 'file.ts'))
+  })
+
   it('toWorkdirRelative maps inside-workdir absolutes and passes everything else through', () => {
     expect(toWorkdirRelative('/w/a/b.ts', '/w')).toBe('a/b.ts')
     expect(toWorkdirRelative('/w', '/w')).toBe('.')

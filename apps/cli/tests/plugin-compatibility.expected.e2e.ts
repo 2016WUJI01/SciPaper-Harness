@@ -7,7 +7,11 @@ import { execa } from 'execa'
 import { expect, it, onTestFinished } from 'vitest'
 
 const bin = fileURLToPath(new URL('../lib/bin.js', import.meta.url))
-const version = (JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as { version: string }).version
+const manifest = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as {
+  version: string
+  scipaper: { kernel: { version: string } }
+}
+const version = manifest.scipaper.kernel.version
 
 it('refuses incompatible installation and startup until an exact risk exemption is granted', async () => {
   const home = mkdtempSync(join(tmpdir(), 'dsh-compatibility-cli-'))
@@ -54,15 +58,22 @@ it('refuses incompatible installation and startup until an exact risk exemption 
   expect(deniedStartup.stderr).toContain('incompatible')
   const missingConsent = await plugin(['allow-version', 'compatibility-fixture@1.0.0', '--dsh-version', version])
   expect(missingConsent.exitCode).toBe(1)
+  // Plugin exemptions target the embedded DSH kernel, not the SciPaper release.
+  expect(manifest.version).not.toBe(version)
+  const wrongVersion = await plugin(['allow-version', 'compatibility-fixture@1.0.0', '--dsh-version', manifest.version, '--accept-risk'])
+  expect(wrongVersion.exitCode).toBe(1)
+  expect(wrongVersion.stderr).toContain(`this application runs DSH ${version}`)
+  expect(existsSync(join(profile, 'compatibility.json'))).toBe(false)
   const granted = await plugin(['allow-version', 'compatibility-fixture@1.0.0', '--dsh-version', version, '--accept-risk'])
-  expect(granted.exitCode).toBe(0)
+  expect(granted.exitCode, `${granted.stdout}\n${granted.stderr}`).toBe(0)
   expect(granted.stderr).toContain('break the application or corrupt data')
   // The exemption is profile metadata of its own; the dependency manifest and bundle list stay untouched.
   expect(JSON.parse(readFileSync(join(profile, 'compatibility.json'), 'utf8'))).toEqual({ 'compatibility-fixture@1.0.0': [version] })
   expect(JSON.parse(readFileSync(profileFile, 'utf8'))).not.toHaveProperty('dsh.profile.versionExemptions')
-  expect((await plugin(['add', source, '--offline', '--ignore-scripts'])).exitCode).toBe(0)
+  const installed = await plugin(['add', source, '--offline', '--ignore-scripts'])
+  expect(installed.exitCode, `${installed.stdout}\n${installed.stderr}`).toBe(0)
   const admittedStartup = await run(['--profile', 'compatibility'])
-  expect(admittedStartup.exitCode).toBe(0)
+  expect(admittedStartup.exitCode, `${admittedStartup.stdout}\n${admittedStartup.stderr}`).toBe(0)
   expect(admittedStartup.stdout).toContain('PLUGIN_STARTED')
   expect((await plugin(['revoke-version', 'compatibility-fixture@1.0.0', '--dsh-version', version])).exitCode).toBe(0)
   expect((await run(['--profile', 'compatibility'])).stdout).not.toContain('PLUGIN_IMPORTED')

@@ -20,10 +20,10 @@ function discover(value: unknown, secrets: Set<string>, key = '', serializedDept
         discover(decoded, secrets, '', serializedDepth + 1)
       } catch {}
     }
-    for (const match of value.matchAll(ASSIGNMENT)) remember(match[1] ?? match[2] ?? match[3] ?? '', secrets)
-    for (const match of value.matchAll(/密码\s*(?:[:=：]|是|为)?\s*["']?([A-Za-z0-9][^\s"'`;，。]{3,})/gu)) remember(match[1] ?? '', secrets)
+    for (const match of value.matchAll(ASSIGNMENT)) remember(match[1] ?? match[2] ?? (match[3] as string), secrets)
+    for (const match of value.matchAll(/密码\s*(?:[:=：]|是|为)?\s*["']?([A-Za-z0-9][^\s"'`;，。]{3,})/gu)) remember(match[1] as string, secrets)
     for (const match of value.matchAll(TOKEN)) remember(match[0], secrets)
-    for (const match of value.matchAll(/https?:\/\/[^\s/:]+:([^\s/@]+)@/gu)) remember(match[1] ?? '', secrets)
+    for (const match of value.matchAll(/https?:\/\/[^\s/:]+:([^\s/@]+)@/gu)) remember(match[1] as string, secrets)
     return
   }
   if (Array.isArray(value)) {

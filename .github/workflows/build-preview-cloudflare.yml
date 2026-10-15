@@ -1,9 +1,8 @@
 name: Build PR preview
 
-# Every push to a pull request publishes that pull request's preview to
-# Cloudflare Pages under its own branch alias, behind Cloudflare Access. The
-# upload carries build products only: the workflow never grants the deployment
-# platform access to this repository's sources.
+# Every pull request retains built preview artifacts. Configured, trusted PRs
+# also publish to Cloudflare Pages behind Access. Uploads contain build products
+# only; the deployment platform never receives repository access.
 
 on:
   pull_request:
@@ -25,7 +24,8 @@ env:
   # Cloudflare Pages project receiving the upload. Its preview deployments are
   # the surface the Access application protects; the project's production branch
   # is deliberately a name no deployment uses, so no unprotected URL exists.
-  CF_PROJECT: dsh-build-preview
+  # Forks opt in with their own project; only upstream keeps the existing one.
+  CF_PROJECT: ${{ vars.CF_PREVIEW_PROJECT || (github.repository == 'deepseek-harness/deepseek-harness' && 'dsh-build-preview') || '' }}
   # CI runs must never report to the production telemetry endpoint baked into
   # apps/cli/cordis.yml (AppCLIEntry disables the row when set).
   DSH_TELEMETRY_DISABLED: '1'
@@ -86,8 +86,36 @@ jobs:
         run: |
           find apps/web/dist -name '*.map' -delete
           cp apps/web/dist/preview.html apps/web/dist/index.html
+          gzip -t apps/web/dist/preview/vfs-image.tar.gz
+
+      - name: Retain preview artifacts
+        id: preview_artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr-preview-${{ github.event.pull_request.number }}
+          path: apps/web/dist
+          if-no-files-found: error
+          compression-level: 0
+
+      # Credential values stay out of this step. Deployment needs Access
+      # credentials too, so a partially configured project cannot publish.
+      - name: Select preview publication mode
+        id: deployment
+        env:
+          DEPLOY_PREVIEW: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]' && github.event.pull_request.user.login != 'dependabot[bot]' && env.CF_PROJECT != '' && secrets.CLOUDFLARE_API_TOKEN != '' && secrets.CLOUDFLARE_ACCOUNT_ID != '' && secrets.CF_ACCESS_CLIENT_ID != '' && secrets.CF_ACCESS_CLIENT_SECRET != '' }}
+          ARTIFACT_URL: ${{ steps.preview_artifact.outputs.artifact-url }}
+        run: |
+          echo "enabled=$DEPLOY_PREVIEW" >> "$GITHUB_OUTPUT"
+          if [ "$DEPLOY_PREVIEW" = "true" ]; then
+            echo 'Protected Cloudflare deployment and image verification are enabled.' >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo 'Artifact-only preview: deployment and protected-image verification were not run.' >> "$GITHUB_STEP_SUMMARY"
+            echo 'Publication requires a same-repository, non-Dependabot PR, a configured project, and all deployment and Access credentials.' >> "$GITHUB_STEP_SUMMARY"
+          fi
+          printf '\n[Download built preview artifacts](%s)\n' "$ARTIFACT_URL" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload to Cloudflare Pages
+        if: steps.deployment.outputs.enabled == 'true'
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -112,6 +140,7 @@ jobs:
       # Accept-Encoding is sent because a browser sends it; the assertion is
       # about what the platform does with a body that is already compressed.
       - name: Verify the protected deployment serves the image
+        if: steps.deployment.outputs.enabled == 'true'
         env:
           CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
           CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
@@ -151,6 +180,7 @@ jobs:
       # idempotent: a pull request opened before this workflow existed never
       # sees an `opened` event, and every later push must not restate the URL.
       - name: Comment the preview URL
+        if: steps.deployment.outputs.enabled == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR: ${{ github.event.pull_request.number }}

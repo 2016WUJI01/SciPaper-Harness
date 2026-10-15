@@ -97,7 +97,7 @@ describe.skipIf(webSnapshotMode() === 'record')('historical preset restoration t
       const childText = Buffer.concat(scanZstdFrames(childPublished).frames
         .map(({ start, end }) => zstdDecompressSync(childPublished.subarray(start, end)))).toString('utf8')
       expect(childText.trimEnd().split('\n').map((line): unknown => JSON.parse(line))).toEqual([
-        { ...childHeader, version: SESSION_FORMAT_VERSION, agentPreset: 'ptc' }, ...childRows,
+        { ...childHeader, version: SESSION_FORMAT_VERSION, agentPreset: 'ptc', execution: { kind: 'local' } }, ...childRows,
       ])
       expect(await readFile(childPath)).toEqual(childSource)
       expect(await readFile(brokenPath)).toEqual(brokenSource)
@@ -109,7 +109,7 @@ describe.skipIf(webSnapshotMode() === 'record')('historical preset restoration t
       const published = Buffer.concat(scanZstdFrames(publishedBytes).frames
         .map(({ start, end }) => zstdDecompressSync(publishedBytes.subarray(start, end)))).toString('utf8')
       const expected = [
-        { ...header, version: SESSION_FORMAT_VERSION, agentPreset: 'ptc' },
+        { ...header, version: SESSION_FORMAT_VERSION, agentPreset: 'ptc', execution: { kind: 'local' } },
         ...rows.map(row => row['type'] === 'agent-preset/selected'
           && (row['data'] as { agentPreset: string }).agentPreset === 'code'
           ? { ...row, data: { agentPreset: 'ptc' } }

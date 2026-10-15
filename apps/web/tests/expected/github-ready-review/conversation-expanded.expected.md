@@ -11,6 +11,7 @@
 - banner:
   - navigation "Session hierarchy": Review deepseek-ai/deepseek-harness#314
   - text: Standard mode
+  - button "Stop all"
   - button "More actions"
   - button "Open right sidebar"
   - tablist:
@@ -27,7 +28,7 @@
 - button "Bad response"
 - button "Continue from here"
 - text: {{clock}}
-- textbox "Message or run a task, / commands, @ files or sessions"
+- textbox "Keep going, or drop in papers and data; / for commands, @ for files or conversations"
 - button "Add files or run commands"
 - 'button "Access mode, current: Read Only"': Read Only
 - button "Select model, current github-webhook-review-test/reply": github-webhook-review-test/reply

@@ -1,11 +1,14 @@
 - banner:
   - navigation "Session hierarchy": Inline code links
+  - button "Stop all"
   - button "More actions"
   - tablist:
     - tab "Chat" [selected]
     - tab "Trajectory"
 - text: Show the local preview URL. {{clock}}
 - button "Copy"
+- button "Edit and resend"
+- button "Resend"
 - status: Completed
 - button "Completed in {{duration}}" [disabled]
 - heading "Inline code links" [level=2]
@@ -30,7 +33,7 @@
 - button "Bad response"
 - button "Continue from here"
 - text: {{clock}}
-- textbox "Message or run a task, / commands, @ files or sessions"
+- textbox "Keep going, or drop in papers and data; / for commands, @ for files or conversations"
 - button "Add files or run commands"
 - 'button "Access mode, current: Workspace Write"': Workspace Write
 - button "Select model, current DeepSeek-V4-Flash": DeepSeek-V4-Flash

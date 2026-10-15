@@ -57,6 +57,16 @@ export const PAGE_ASSETS: readonly string[] = [
   'node_modules/@*/*/lib/client.*.js',
 ]
 
+/** Standalone process entries are read as bytes and never evaluated by the Worker loader. */
+export const PROCESS_ASSETS: readonly string[] = [
+  'node_modules/@deepseek-ai/dsh-ssh/lib/helper.js',
+]
+
+/** Runtime modules loaded through computed filesystem paths instead of static specifiers. */
+export const DYNAMIC_MODULES: readonly string[] = [
+  'node_modules/@deepseek-ai/dsh-tool-web/assets/html-converter.cjs',
+]
+
 /**
  * Image specifiers the worker assembly requires directly, beyond the composed
  * roster: they are requested by worker-bundle code, so no image file

@@ -12,7 +12,7 @@ import type { WorkspaceId } from '@deepseek-ai/dsh-workspace'
 import type { EnvironmentId, ExperimentId, ExperimentRecord } from '../src/types.ts'
 
 let ctx: Context | undefined
-afterEach(async () => { await ctx?.fiber.dispose(); ctx = undefined })
+afterEach(async () => { vi.restoreAllMocks(); vi.useRealTimers(); await ctx?.fiber.dispose(); ctx = undefined })
 
 function agent(id: string, cwd: string): Agent {
   const sessionId = SessionId(id)
@@ -50,7 +50,7 @@ async function fixture() {
   const request = (caller = owner, timeout = 1000): SessionStopRequest => ({
     sessionId: caller.id, caller, agents: [caller], deadline: Date.now() + timeout,
   })
-  return { project, owner, detach, run, stops, observe, requestCancel, request, state: (value: typeof state) => { state = value } }
+  return { project, owner, detach, run, stops, observe, ledger, requestCancel, request, state: (value: typeof state) => { state = value } }
 }
 
 it('stops the supervisor through the explicit job source and waits for actual confirmation', async () => {
@@ -210,4 +210,85 @@ it('does not claim preparation stopped while its durable run remains queued', as
   control.ready('cancelled')
   expect(await f.stops.stop(f.request())).toMatchObject({ confirmed: false, targets: [{ status: 'queued', confirmed: false }] })
   expect(f.observe).not.toHaveBeenCalled()
+})
+
+
+it('rejects an unregistered producer before granting stop authority', async () => {
+  const f = await fixture()
+  const stranger = agent('unregistered', f.project.root)
+  expect(() => f.stops.admit(f.project, f.run, stranger)).toThrow('not the registered runtime Agent')
+  expect(f.observe).not.toHaveBeenCalled()
+})
+
+it('selects desktop submissions globally and from their current project only', async () => {
+  const f = await fixture()
+  const control = f.stops.admit(f.project, f.run, undefined)
+  control.submitting(); control.ready()
+  expect((await f.stops.stop({ agents: [], deadline: Date.now() + 1000 })).confirmed).toBe(true)
+  expect(f.observe).toHaveBeenCalledTimes(1)
+  expect((await f.stops.stop(f.request())).confirmed).toBe(true)
+  expect(f.observe).toHaveBeenCalledTimes(1)
+})
+
+it('reports an expired preparation without trying to cancel a supervisor that was never submitted', async () => {
+  const f = await fixture()
+  const control = f.stops.admit(f.project, f.run, f.owner)
+  const result = await f.stops.stop({ ...f.request(), deadline: Date.now() - 1 })
+  expect(result).toMatchObject({ confirmed: false, targets: [{ confirmed: false }] })
+  expect(control.cancelledBeforeSubmission).toBe(true)
+  expect(f.requestCancel).not.toHaveBeenCalled()
+})
+
+it('stops waiting for preparation when the caller cancels the shared request', async () => {
+  const f = await fixture(), controller = new AbortController()
+  const control = f.stops.admit(f.project, f.run, f.owner)
+  const stopping = f.stops.stop({ ...f.request(), signal: controller.signal })
+  await vi.waitFor(() => { expect(control.signal.aborted).toBe(true) })
+  controller.abort()
+  const result = await stopping
+  expect(result.targets[0]).toMatchObject({ confirmed: false, error: 'Error: Experiment stop deadline reached' })
+  expect(f.observe).not.toHaveBeenCalled()
+})
+
+it('observes cancellation between admission validation and attaching the preparation listener', async () => {
+  const f = await fixture(), controller = new AbortController()
+  f.stops.admit(f.project, f.run, f.owner)
+  let reads = 0
+  f.ledger.projects = () => { if (++reads === 3) controller.abort(); return [f.project] }
+  const result = await f.stops.stop({ ...f.request(), signal: controller.signal })
+  expect(result.targets[0]).toMatchObject({ confirmed: false, error: 'Error: Experiment stop deadline reached' })
+  expect(f.observe).not.toHaveBeenCalled()
+})
+
+it('does not begin an observation after preparation uses the remaining shared deadline', async () => {
+  const f = await fixture()
+  vi.useFakeTimers({ toFake: ['Date'] })
+  const start = Date.now()
+  const control = f.stops.admit(f.project, f.run, f.owner)
+  control.submitting()
+  const stopping = f.stops.stop({ ...f.request(), deadline: start + 1000 })
+  await vi.waitFor(() => { expect(control.signal.aborted).toBe(true) })
+  vi.setSystemTime(start + 2000)
+  control.ready()
+  const result = await stopping
+  expect(result.targets[0]).toMatchObject({ confirmed: false, error: 'Experiment stop was not confirmed before the deadline' })
+  expect(f.observe).not.toHaveBeenCalled()
+})
+
+
+it('accepts only terminal observations that retain the admitted supervisor identity', async () => {
+  const f = await fixture()
+  const control = f.stops.admit(f.project, f.run, f.owner)
+  control.submitting(); control.ready()
+  f.stops.confirmed(f.project.id, { ...f.run, id: 'not-admitted' as ExperimentId, status: 'completed' })
+  for (const patch of [
+    { status: 'running' as const }, { directory: 'foreign-directory' }, { environmentFingerprint: 'foreign-environment' },
+    { spec: { ...f.run.spec, argv: ['different.py'] } },
+  ]) f.stops.confirmed(f.project.id, { ...f.run, status: 'completed', ...patch })
+  expect((await f.stops.stop(f.request())).targets[0]).toMatchObject({ status: 'cancelled', confirmed: true })
+  expect(f.observe).toHaveBeenCalledTimes(1)
+  f.project.experiments[0]!.status = 'completed'
+  f.stops.confirmed(f.project.id, { ...f.run, status: 'completed' })
+  expect((await f.stops.stop(f.request())).targets[0]).toMatchObject({ status: 'completed', confirmed: true })
+  expect(f.observe).toHaveBeenCalledTimes(1)
 })

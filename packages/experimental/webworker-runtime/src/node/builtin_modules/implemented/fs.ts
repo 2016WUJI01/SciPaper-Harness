@@ -224,6 +224,7 @@ export function lstat(
 export function realpathSync(path: PathArg): string {
   return vfs().realpathSync(asPath(path))
 }
+realpathSync.native = realpathSync
 
 /**
  * Resolve a UTF-8 path through Node's callback form and its native alias.

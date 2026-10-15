@@ -2,6 +2,10 @@
   - button "Use actual duration": Duration
   - button "Collapse turns": Turns
   - button "Collapse calls": Calls
+  - group "Session log":
+    - text: Log ID navigati
+    - button "Copy log ID"
+    - button "Export log"
   - searchbox "Search trajectory"
 - region "Trajectory timeline"
 - table:

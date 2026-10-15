@@ -101,7 +101,7 @@ describe.skipIf(MODE === 'record')('web e2e: background job list', () => {
 
     await trigger.waitFor({ timeout: 15_000 })
     await trigger.click()
-    const row = page.getByRole('list', { name: 'Background jobs' }).getByRole('listitem').first()
+    const row = page.getByRole('list', { name: 'Background jobs' }).getByRole('listitem').filter({ hasText: COMMAND })
     await row.waitFor({ timeout: 10_000 })
     await expect.poll(() => row.textContent()).toContain(COMMAND)
 

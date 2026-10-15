@@ -11,7 +11,14 @@ import { createClientTest, type TestClient, webApp } from '@deepseek-ai/dsh-clie
 import { inject } from '../src/client/index.ts'
 import type { SettingsRootInjected } from '../src/client/shell-contract.ts'
 import { SettingsRoot } from '../src/client/SettingsRoot.tsx'
+import type { DesktopRemoteInjected } from '../src/client/DesktopRemoteRow.tsx'
 import type { DesktopUpdatePresentation } from '../src/types.ts'
+import type { StoredEntry } from '@deepseek-ai/dsh-client-ui-slots'
+
+/** The carrier row's concrete face inside the registry's erased record. */
+interface RemoteAccessEntry extends StoredEntry {
+  inject: () => DesktopRemoteInjected & Record<string, unknown>
+}
 
 const SELF = '@deepseek-ai/dsh-client-ui-settings-general'
 const SIDEBAR = '@deepseek-ai/dsh-client-ui-sidebar'
@@ -177,3 +184,31 @@ describe('ui-settings-general shell', () => {
     for (const name of CHILD_NAMES) expect(c.ctx.slots.spec(name)).toBeUndefined()
   })
 })
+
+
+it('registers remote-access controls only for the supported carrier and releases invitation data on unload', async ({ start }) => {
+  const off = vi.fn()
+  const remoteAccess = {
+    status: vi.fn(async () => ({ phase: 'idle' as const })),
+    subscribe: vi.fn(() => off),
+    start: vi.fn(async () => {}),
+    refresh: vi.fn(async () => {}),
+    stop: vi.fn(async () => {}),
+  }
+  vi.stubGlobal('dshDesktop', { protocolVersion: 1, remoteAccess })
+  onTestFinished(() => { vi.unstubAllGlobals() })
+  const c = await start()
+  const entry = c.ctx.slots.entries('settings.general.item')
+    .find(row => row.options.id === 'remote-access') as RemoteAccessEntry | undefined
+  if (entry?.inject === undefined) throw new Error('remote-access entry registered no inject face')
+  expect(entry.options.order).toBe(80)
+  const injected = entry.inject()
+  expect(injected.hooks.remoteAccess.getSnapshot().presentation).toEqual({ phase: 'idle' })
+  injected.run('start')
+  expect(remoteAccess.start).toHaveBeenCalledOnce()
+  await c.unload(SELF)
+  await c.flush()
+  expect(off).toHaveBeenCalledOnce()
+  expect(injected.hooks.remoteAccess.getSnapshot()).toEqual({ presentation: { phase: 'idle' }, failed: false, refreshing: false })
+  expect(c.ctx.slots.entries('settings.general.item').some(row => row.options.id === 'remote-access')).toBe(false)
+}, COLD_BOOT_TIMEOUT_MS)

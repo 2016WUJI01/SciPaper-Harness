@@ -4,7 +4,7 @@ import fs from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import semver from 'semver'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { evaluatePluginCompatibility, getDshRuntimeVersion, pluginCompatibilityWarning } from '../src/plugin-compatibility.ts'
+import { evaluatePluginCompatibility, getDshProductVersion, getDshRuntimeVersion, pluginCompatibilityWarning } from '../src/plugin-compatibility.ts'
 
 const runtime = '0.1.7-alpha.1'
 const identity = { name: '@example/plugin', version: '2.0.0' }
@@ -21,6 +21,19 @@ function check(peerDependencies: object) {
 afterEach(() => vi.restoreAllMocks())
 
 describe('dsh runtime version', () => {
+  it('reports the product release separately from the embedded kernel', () => {
+    expect(getDshProductVersion()).toBe(product.version)
+    expect(getDshRuntimeVersion()).toBe(product.scipaper.kernel.version)
+    const read = vi.spyOn(fs, 'readFileSync')
+    read.mockReturnValueOnce(JSON.stringify({ version: '1.2.3', scipaper: { kernel: { name: 'dsh', version: '0.2.0' } } }))
+    expect(getDshProductVersion()).toBe('1.2.3')
+    expect(read).toHaveBeenCalledWith(fileURLToPath(new URL('../package.json', import.meta.url)), 'utf8')
+    read.mockReturnValueOnce('{}')
+    expect(() => getDshProductVersion()).toThrow('Invalid dsh runtime version')
+    read.mockReturnValueOnce('{"version":"broken"}')
+    expect(() => getDshProductVersion()).toThrow('Invalid dsh runtime version')
+  })
+
   it('reads the exact version with a string path accepted by executable virtual filesystems', () => {
     const { scipaper: { kernel: { version: expected } } } = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as { scipaper: { kernel: { version: string } } }
     const read = vi.spyOn(fs, 'readFileSync')
@@ -40,7 +53,7 @@ describe('dsh runtime version', () => {
     const read = vi.spyOn(fs, 'readFileSync')
     read.mockReturnValueOnce(JSON.stringify({ version: '0.1.7-rc.2' }))
     expect(getDshRuntimeVersion()).toBe('0.1.7-rc.2')
-    for (const scipaper of [null, {}, { kernel: null }, { kernel: { version: 'bad' } }]) {
+    for (const scipaper of [null, {}, { kernel: null }, { kernel: { version: 'bad' } }, { kernel: { name: 'deepseek-harness' } }]) {
       read.mockReturnValueOnce(JSON.stringify({ version: '0.2.0-alpha.4', scipaper }))
       expect(() => getDshRuntimeVersion()).toThrow()
     }

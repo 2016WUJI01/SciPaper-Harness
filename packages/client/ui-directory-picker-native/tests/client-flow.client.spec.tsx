@@ -166,7 +166,7 @@ describe('directory-picker-native client half', () => {
   })
 
   it.each(['win32', 'darwin'] as const)('consumes the actual Desktop preload directory bridge on %s', async (platform) => {
-    vi.spyOn(process, 'platform', 'get').mockReturnValue(platform)
+    vi.stubGlobal('process', { ...process, platform, isMainFrame: true })
     vi.resetModules()
     vi.stubGlobal('location', new URL('dsh-app://app/'))
     // Desktop's preload is typechecked by its own compiler program.
@@ -183,6 +183,31 @@ describe('directory-picker-native client half', () => {
       await expect(injected.pick()).resolves.toBe('/desktop/workspace')
       expect(desktopIpc.invoke).toHaveBeenCalledExactlyOnceWith('dsh-desktop:directory-pick')
       expect(b.pickDirectory).not.toHaveBeenCalled()
+    } finally {
+      await fiber.dispose()
+      dispose()
+    }
+  })
+
+  it.each([
+    { isMainFrame: false, url: 'dsh-app://app/' },
+    { isMainFrame: true, url: 'https://example.invalid/' },
+  ])('withholds the Desktop picker from $url when isMainFrame=$isMainFrame', async ({ isMainFrame, url }) => {
+    vi.stubGlobal('process', { ...process, isMainFrame })
+    vi.resetModules()
+    vi.stubGlobal('location', new URL(url))
+    const preload = '../../../../apps/desktop/src/preload-app.ts'
+    await import(/* @vite-ignore */ preload)
+    const b = await bench()
+    const dispose = b.declare()
+    const fiber = b.ctx.plugin({ inject: [...inject], apply })
+    try {
+      await fiber.await()
+      const entry = b.slots.entries(HOLES[0])[0]!
+      const injected = (entry.inject as () => { pick: () => Promise<string | null> })()
+      await expect(injected.pick()).resolves.toBe('/tmp/picked')
+      expect(b.pickDirectory).toHaveBeenCalledOnce()
+      expect(desktopIpc.invoke).not.toHaveBeenCalled()
     } finally {
       await fiber.dispose()
       dispose()

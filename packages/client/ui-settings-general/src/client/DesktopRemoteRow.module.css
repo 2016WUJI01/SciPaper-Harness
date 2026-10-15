@@ -3,5 +3,5 @@
 .description { margin-top: 6px; color: var(--dsw-alias-label-secondary); font-size: 12px; line-height: 18px; }
 .status { margin: 12px 0; font-size: 13px; }
 .origin { overflow-wrap: anywhere; color: var(--dsw-alias-label-secondary); font-size: 12px; }
-.qr { display: block; width: 216px; max-width: 100%; height: auto; margin: 12px 0; border-radius: 12px; }
+.qr { display: block; width: 216px; max-width: 100%; height: auto; margin: 12px 0; border-radius: var(--dsw-radius-md); }
 .actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }

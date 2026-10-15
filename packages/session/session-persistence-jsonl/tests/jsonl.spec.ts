@@ -449,6 +449,14 @@ describe('JsonlSessionPersistence: format helpers', () => {
       .toMatchObject(remote)
   })
 
+  it.each([null, 'local', [], { kind: 'local', extra: true }, { kind: 'ssh' },
+    { kind: 'ssh', host: '' }, { kind: 'ssh', host: '  ' }, { kind: 'ssh', host: 4 },
+    { kind: 'ssh', host: 'gpu-a', extra: true }, { kind: 'remote' },
+  ])('rejects malformed execution metadata in the physical header: %j', (execution) => {
+    const line = { ...toHeaderLine(meta('invalid-execution')), execution }
+    expect(() => scanLog(Buffer.from(`${JSON.stringify(line)}\n`))).toThrow(/session header/)
+  })
+
   it.each([
     ['unseeded', false, 0],
     ['empty-seed', true, 0],
@@ -712,6 +720,25 @@ describe('JsonlSessionPersistence: immutable format generations', () => {
   })
 
   afterEach(async () => { await ctx.fiber.dispose() })
+
+  it.each([0, 1, 2, 3, 4, 5])('normalizes omitted execution through stat, list, and open for format v%i', async (version) => {
+    const header = meta(`implicit-local-v${version}`)
+    const sourcePath = generationLogPath(root, header.cwd, header.id, version, 'none')
+    const physical = { ...releasedV0Header(header), version, ...(version >= 2 ? { isSeeded: false } : {}) }
+    const source = Buffer.from(`${JSON.stringify(physical)}\n`)
+    await mkdir(dirname(sourcePath), { recursive: true })
+    await writeFile(sourcePath, source)
+
+    const expected = { id: header.id, version: SESSION_FORMAT_VERSION, execution: { kind: 'local' } }
+    expect((await ctx.sessionPersistence.stat(header.id))?.header).toMatchObject(expected)
+    expect((await ctx.sessionPersistence.list()).map(row => row.header)).toMatchObject([expected])
+    const restored = await readAll(ctx.sessionPersistence, header.id)
+    expect(restored.meta).toMatchObject(expected)
+    expect(restored.events).toEqual([])
+    expect(await readFile(sourcePath)).toEqual(source)
+    expect((await readdir(dirname(sourcePath))).filter(name => name !== 'session.lock'))
+      .toEqual([generationLogFilename(version, 'none')])
+  })
 
   it.each([3, SESSION_FORMAT_VERSION])('shares deeply frozen opaque JSON from format v%s', async (version) => {
     type NestedValue = {

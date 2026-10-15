@@ -57,7 +57,8 @@ export async function renderFetchBody(body: WebFetchBody, signal: AbortSignal, r
   worker.stderr.resume()
   let termination: Promise<number> | undefined
   const terminate = (): Promise<number> => termination ??= worker.terminate()
-  let abort: (() => void) | undefined
+  // The Promise executor assigns this before any listener registration can throw.
+  let abort!: () => void
   const failure = (): Error => {
     const timeout = timeoutOf(budget.signal, 'WEB_HTML_TIMEOUT')
     const reason: unknown = signal.reason
@@ -83,7 +84,7 @@ export async function renderFetchBody(body: WebFetchBody, signal: AbortSignal, r
       if (budget.signal.aborted) abort()
     })
   } finally {
-    if (abort !== undefined) budget.signal.removeEventListener('abort', abort)
+    budget.signal.removeEventListener('abort', abort)
     await terminate()
     worker.removeAllListeners()
   }

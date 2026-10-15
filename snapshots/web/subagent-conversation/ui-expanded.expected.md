@@ -5,6 +5,7 @@
     - 'button "Switch subagent: event-sourcing researcher"': event-sourcing researcher
     - button "1 subagent"
   - text: Standard mode
+  - button "Stop all"
   - button "More actions"
   - button "Open right sidebar"
   - tablist:
@@ -15,6 +16,8 @@
   - button "Jump to turn 2"
 - text: "Explain event sourcing in one sentence.Your parent agent id is \"session-{{uuid}}\". Before you finish, send your result to that agent with send_message({ agent_id: \"session-{{uuid}}\", message: \"<self-contained result>\" }). The parent shares your workspace but does not automatically receive your transcript, tool output, or reasoning. Send earlier messages as well when a finding changes what the parent should do next; sending a message does not end your turn. {{clock}}"
 - button "Copy"
+- button "Edit and resend"
+- button "Resend"
 - status: Completed
 - button "Completed in {{duration}}" [expanded]
 - button "Analysis completed" [expanded]
@@ -23,9 +26,11 @@
 - button "Copy"
 - button "Good response"
 - button "Bad response"
-- button "Branch into a new conversation"
+- button "Continue from here"
 - text: {{clock}} Now give the same explanation to a human reader. {{clock}}
 - button "Copy"
+- button "Edit and resend"
+- button "Resend"
 - status: Completed
 - button "Completed in {{duration}}" [expanded]
 - button "Analysis completed" [expanded]
@@ -34,9 +39,9 @@
 - button "Copy"
 - button "Good response"
 - button "Bad response"
-- button "Branch into a new conversation"
+- button "Continue from here"
 - text: {{clock}}
-- textbox "Message or run a task, / commands, @ files or sessions"
+- textbox "Keep going, or drop in papers and data; / for commands, @ for files or conversations"
 - button "Add files or run commands"
 - 'button "Access mode, current: Custom"': Custom
 - button "Send message" [disabled]

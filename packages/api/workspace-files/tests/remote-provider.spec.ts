@@ -8,6 +8,20 @@ let harness: Harness | undefined
 afterEach(async () => { await harness?.dispose(); harness = undefined })
 
 describe('SSH workspace file routing', () => {
+  it('refuses a remote scope while required services are missing or activation fails', async () => {
+    harness = await openWorkspace('dsh-remote-workspace-unavailable-')
+    const localResolve = vi.spyOn(harness.ctx.fs, 'resolve')
+    const scope = { sessionId: SessionId('unavailable'), workspaceRoot: '/srv/lab', execution: { kind: 'ssh' as const, host: 'lab' } }
+    const endpoint = harness.endpoint()
+    await expect(endpoint.read(scope, 'paper.md', {}, signal())).rejects.toMatchObject({ code: 'gateway/internal' })
+    const failure = new Error('remote Session cannot resume')
+    harness.ctx.provide('sessionController', { resolveAgent: async () => ({ error: failure }) } as never)
+    await expect(endpoint.read(scope, 'paper.md', {}, signal())).rejects.toMatchObject({ code: 'gateway/internal' })
+    harness.ctx.provide('agentPresets', { serviceFor: () => harness!.ctx.fs } as never)
+    await expect(endpoint.read(scope, 'paper.md', {}, signal())).rejects.toBe(failure)
+    expect(localResolve).not.toHaveBeenCalled()
+  })
+
   it('reads remote text without consulting the local filesystem', async () => {
     harness = await openWorkspace('dsh-remote-workspace-files-')
     const localResolve = vi.spyOn(harness.ctx.fs, 'resolve')
