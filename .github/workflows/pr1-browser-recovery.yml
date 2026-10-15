@@ -18,9 +18,11 @@ jobs:
     env:
       DSH_TELEMETRY_DISABLED: '1'
       DSH_SNAPSHOT: refresh
-      PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/ms-playwright
-      TMPDIR: ${{ runner.temp }}
     steps:
+      - name: Set browser runtime paths
+        run: |
+          echo "PLAYWRIGHT_BROWSERS_PATH=$RUNNER_TEMP/ms-playwright" >> "$GITHUB_ENV"
+          echo "TMPDIR=$RUNNER_TEMP" >> "$GITHUB_ENV"
       - uses: actions/checkout@v6
         with:
           persist-credentials: false
