@@ -36,7 +36,10 @@ jobs:
           python-version: '3.12'
       - run: pnpm install --frozen-lockfile
       - run: bash scripts/prepare-ci-bubblewrap.sh
-      - run: pnpm exec playwright install --with-deps chromium webkit
+      - name: Install browser dependencies
+        run: |
+          sudo find /etc/apt -maxdepth 2 -type f \( -name '*.list' -o -name '*.sources' \) -exec sed -i -E 's@http://([a-z]{2}\.)?archive\.ubuntu\.com/ubuntu@https://archive.ubuntu.com/ubuntu@g; s@http://security\.ubuntu\.com/ubuntu@https://security.ubuntu.com/ubuntu@g' {} +
+          pnpm --filter @deepseek-ai/dsh-web-frontend exec playwright install --with-deps chromium webkit
       - name: Prepare research Python
         run: |
           python -m venv "$RUNNER_TEMP/research-browser-python"

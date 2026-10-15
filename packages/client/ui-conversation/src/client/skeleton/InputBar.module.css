@@ -19,7 +19,8 @@
   padding-top: 4px;
 }
 
-.hero .dock:empty {
+.hero .dock:empty,
+.hero .dock:has(> [data-slot='conversation.composer.dock']:only-child:empty) {
   display: none;
 }
 
