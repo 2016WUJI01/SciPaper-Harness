@@ -207,14 +207,14 @@ describe.skipIf(process.platform === 'win32')('Web sidebar shortcuts', () => {
       const splitKeys = primary === 'Meta' ? '⇧ ⌘ ,' : 'Ctrl + Shift + ,'
       await page.getByRole('tooltip', { name: `Two panes is the limit ${splitKeys}`, exact: true }).waitFor()
 
-      await bind(page, primary, 'Workspace files', 'Split')
+      await bind(page, primary, 'Research files', 'Split')
       await right.getByRole('tab').focus()
       await page.keyboard.press(`${primary}+Shift+,`)
       await expect.poll(() => panel.locator('[data-dockkit-tab]').filter({ hasText: 'Files' }).count()).toBe(2)
       await page.keyboard.press(`${primary}+Shift+,`)
       expect(await right.locator('[data-dockkit-tab]').filter({ hasText: 'Files' }).count()).toBe(1)
 
-      await bind(page, primary, 'New terminal', 'Workspace files')
+      await bind(page, primary, 'New terminal', 'Research files')
       await right.locator('[data-dockkit-tab]').filter({ hasText: 'Files' }).focus()
       await page.keyboard.press(`${primary}+Shift+,`)
       await right.locator('[data-sidebar-terminal]').waitFor()
