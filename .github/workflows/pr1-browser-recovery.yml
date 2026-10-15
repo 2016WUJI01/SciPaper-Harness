@@ -47,16 +47,14 @@ jobs:
           pnpm exec tsx -e 'import { execFileSync } from "node:child_process"; import { PLATFORM_PYTHON_PACKAGES } from "./packages/research/workbench/src/components.ts"; execFileSync(process.env.DSH_RESEARCH_TEST_PYTHON!, ["-m", "pip", "install", ...PLATFORM_PYTHON_PACKAGES], { stdio: "inherit" })'
           echo "DSH_RESEARCH_TEST_PYTHON=$DSH_RESEARCH_TEST_PYTHON" >> "$GITHUB_ENV"
       - run: pnpm run build:official
-      - name: Validate serial browser owners
-        run: |
-          pnpm run test:web:built apps/web/tests/hmr-live.e2e.ts
-          pnpm run test:web:built apps/web/tests/client-plugin-live.e2e.ts
       - name: Refresh browser fixtures for review
         run: >-
           pnpm run test:web:built
-          --exclude=apps/web/tests/hmr-live.e2e.ts
-          --exclude=apps/web/tests/client-plugin-live.e2e.ts
-          --fileParallelism --maxWorkers=4
+          apps/web/tests/shortcuts-panels.e2e.ts
+          apps/web/tests/markdown-wide-table.e2e.ts
+          apps/web/tests/conversation-revision.e2e.ts
+          apps/web/tests/preview-boot.e2e.ts
+          --fileParallelism --maxWorkers=2
           --reporter=default --reporter=json
           --outputFile.json=.artifacts/browser-results.json
       - name: Capture fixture changes
@@ -72,3 +70,4 @@ jobs:
           path: |
             ${{ runner.temp }}/browser-fixtures.patch
             .artifacts/browser-results.json
+            .artifacts/*.png

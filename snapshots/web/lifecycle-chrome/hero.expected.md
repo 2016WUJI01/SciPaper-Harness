@@ -1,6 +1,6 @@
-- button "New session"
+- button "New conversation"
 - button "Collapse sidebar"
-- button "New session": New Session
+- button "New conversation"
 - navigation "Global panels":
   - button "Plugins"
 - text: Workspaces
@@ -14,10 +14,10 @@
 - button "Settings"
 - banner:
   - button "Open right sidebar"
-- text: Into the Unknown Preview
-- button "Choose workspace": workspace
+- text: What shall we work on today?
+- button "Choose project": workspace
 - button "Standard mode"
-- textbox "Describe what you want to build, / commands, @ files or sessions":
+- textbox "Describe your research question, or drop in papers and data; / for commands, @ for files or conversations":
   - paragraph
 - button "Add files or run commands"
 - 'button "Access mode, current: Workspace Write"': Workspace Write

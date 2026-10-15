@@ -1,6 +1,7 @@
 - banner:
   - navigation "会话层级": 只回复 MESSAGES_WEB_READY，不调用
   - text: 标准模式
+  - button "停止全部"
   - button "更多操作"
   - button "打开右侧边栏"
   - tablist:
@@ -8,16 +9,18 @@
     - tab "轨迹"
 - text: 只回复 MESSAGES_WEB_READY，不调用工具。 {{clock}}
 - button "复制"
+- button "编辑并重发"
+- button "重发"
 - status: 已完成
 - button "已完成，用时 {{duration}}" [disabled]
 - paragraph: MESSAGES_WEB_READY
 - button "复制"
 - button "好的回答"
 - button "有问题的回答"
-- button "在新对话中分支"
+- button "回到此处继续"
 - button "用量 8.2K tok"
 - text: {{clock}}
-- textbox "发消息或创建任务, / 调用指令, @ 文件或对话"
+- textbox "接着说，或把论文、数据拖进来（/ 调用指令，@ 引用文件或对话）"
 - button "添加文件或调用指令"
 - button "访问模式，当前：工作区内修改": 工作区内修改
 - button "选择模型，当前 DeepSeek-V4-Flash，推理等级 high": DeepSeek-V4-Flash high

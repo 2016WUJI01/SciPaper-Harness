@@ -1,5 +1,8 @@
 - list "Background jobs":
   - listitem:
+    - text: Background jobs
+    - button "Stop all"
+  - listitem:
     - button "Finished 1" [expanded]
     - button "Clear"
   - listitem:

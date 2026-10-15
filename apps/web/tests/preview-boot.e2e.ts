@@ -318,7 +318,7 @@ async function bootPreview(origin: string, browser: Browser): Promise<void> {
     const configureLater = page.getByRole('button', { name: 'Configure later' })
     await configureLater.waitFor({ timeout: HERO_TIMEOUT_MS })
     await configureLater.click()
-    await page.locator('[data-composer-input][data-placeholder="Describe your research question, or drop in papers and data; / for commands, @ for files or conversations"]')
+    await page.locator('[data-composer-input][contenteditable="true"]')
       .waitFor({ timeout: 30_000 })
 
     const exercised = await page.evaluate(async ({ seededSessionId, seededSessionTitle }) => {
@@ -344,20 +344,25 @@ async function bootPreview(origin: string, browser: Browser): Promise<void> {
       // Remote namespaces answer over the same unary carrier; the args object
       // keys every wire parameter by its name.
       const remote = async <T>(endpoint: string, args: object): Promise<T> => {
-        const answered = await transport.fetch(`/api/${endpoint}`, {
+        let timer: ReturnType<typeof setTimeout> | undefined
+        const timedOut = new Promise<never>((_resolve, reject) => {
+          timer = setTimeout(() => { reject(new Error(`${endpoint} did not respond within 30 seconds`)) }, 30_000)
+        })
+        const answered = await Promise.race([transport.fetch(`/api/${endpoint}`, {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({
             type: 'client-request', rpcId: `preview-${endpoint.replace('/', '-')}`,
             method: endpoint, payload: { args },
           }),
-        })
+        }), timedOut]).finally(() => { clearTimeout(timer) })
         const body = await answered.json() as Result<T>
         if (!body.result.ok) throw new Error(`${endpoint} failed: ${body.result.error.message}`)
         return body.result.value
       }
       // Keep the fixture title stable for later UI assertions; increasing seqs
       // prove that the cold Session acquired its write lease and appended.
+      await remote('research/snapshot', {})
       const firstRename = await remote<{ title: string; seq: number }>('session/rename', {
         request: { sessionId: seededSessionId, title: seededSessionTitle },
       })
@@ -433,13 +438,19 @@ async function bootPreview(origin: string, browser: Browser): Promise<void> {
     expect(exercised.skillCount).toBeGreaterThan(0)
     expect(exercised.credentialConfigured).toBe(true)
 
-    const sessions = page.getByRole('tree', { name: 'Sessions' })
+    const sessions = page.getByRole('tree', { name: 'Research projects' })
+    await sessions.getByRole('treeitem', { name: 'workspace', exact: true }).click()
     const showcase = sessions.getByRole('treeitem').filter({ hasText: SHOWCASE_TITLE })
     await expect.poll(() => showcase.count(), { timeout: 15_000 }).toBe(1)
     expect(await showcase.locator('[data-session-schedule-mark]').count()).toBe(0)
     await showcase.click()
     await page.getByText(SHOWCASE_TAIL, { exact: true }).waitFor({ timeout: 30_000 })
-    expect(await page.locator('[data-schedule-reminder-entry]').count()).toBe(0)
+    const reminders = page.locator('[data-schedule-reminder-entry]')
+    await reminders.waitFor()
+    await reminders.click()
+    await page.getByText('Daily preview digest', { exact: true }).waitFor()
+    await page.getByText('Preview release window', { exact: true }).waitFor()
+    await page.keyboard.press('Escape')
 
     expect(await page.getByText(SHOWCASE_OLDEST, { exact: true }).count()).toBe(0)
     // Complete Turns can fold while earlier history is still unloaded.
@@ -500,8 +511,11 @@ async function bootEmptyPreview(origin: string, browser: Browser): Promise<void>
     )
     expect(bootLine).toContain(`image lowering=${WRAPPER_CONTRACT}`)
     expect(bootLine).toContain('data overlays=0')
-    await page.getByRole('textbox', { name: 'Choose project' }).waitFor({ timeout: HERO_TIMEOUT_MS })
-    const sessionCount = await page.evaluate(async () => {
+    const configureLater = page.getByRole('button', { name: 'Configure later' })
+    await configureLater.waitFor({ timeout: HERO_TIMEOUT_MS })
+    await configureLater.click()
+    await page.locator('[data-composer-input][contenteditable="true"]').waitFor({ timeout: 30_000 })
+    const sessionIds = await page.evaluate(async () => {
       const transport = (globalThis as typeof globalThis & {
         __DSH_TRANSPORT__?: { fetch(input: string, init: RequestInit): Promise<Response> }
       }).__DSH_TRANSPORT__
@@ -515,12 +529,14 @@ async function bootEmptyPreview(origin: string, browser: Browser): Promise<void>
         }),
       })
       const body = await response.json() as {
-        result: { ok: true; value: { items: unknown[] } } | { ok: false; error: { message: string } }
+        result: { ok: true; value: { items: Array<{ sessionId: string }> } } | { ok: false; error: { message: string } }
       }
       if (!body.result.ok) throw new Error(`empty session/list failed: ${body.result.error.message}`)
-      return body.result.value.items.length
+      return body.result.value.items.map(item => item.sessionId)
     })
-    expect(sessionCount).toBe(0)
+    // Research startup may create an ordinary blank conversation and product examples.
+    // The empty source must not import any of the optional showcase's history.
+    for (const id of Object.values(VFS_EXAMPLE_SESSION_IDS)) expect(sessionIds).not.toContain(id)
     expect(pageErrors.map(error => error.message)).toEqual([])
     // The packed base Web image includes Open In, but this static preview has
     // neither native-app discovery nor the development HMR event stream.

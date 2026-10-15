@@ -26,7 +26,7 @@ import picomatch from 'picomatch'
 import yaml from 'js-yaml'
 import { entryListSchema } from '@deepseek-ai/cordis-plugin-include'
 import { WRAPPER_CONTRACT, type ImageFiles, type TransformOutcome } from './transform-image.ts'
-import { EXCLUDE, EXCLUDE_WORKSPACE, IMAGE_ENTRY_SEEDS, PAGE_ASSETS, PROCESS_ASSETS } from './rules.ts'
+import { DYNAMIC_MODULES, EXCLUDE, EXCLUDE_WORKSPACE, IMAGE_ENTRY_SEEDS, PAGE_ASSETS, PROCESS_ASSETS } from './rules.ts'
 
 export { DEFAULT_ROOT } from '@deepseek-ai/dsh-experimental-webworker-runtime'
 
@@ -54,6 +54,9 @@ const pageAsset = picomatch([...PAGE_ASSETS], { dot: true })
 
 /** Process artifacts retain their exact bytes for hashing and remote installation. */
 const processAsset = picomatch([...PROCESS_ASSETS], { dot: true })
+
+/** Computed-path module roots still pass through the Worker lowering and dependency sweep. */
+const dynamicModule = picomatch([...DYNAMIC_MODULES], { dot: true })
 
 /** One directory tree to copy into the image at a caller-selected mount. */
 export interface ImageTree {
@@ -149,7 +152,7 @@ function packageNameOf(specifier: string): string {
 
 /**
  * Collect module-specifier `name` fields from parsed entry rows, recursively
- * through nested `config` row lists (groups). Builtin rows (`cordis:group`)
+ * through nested `config` row lists (groups) and preset `config.plugins` lists. Builtin rows (`cordis:group`)
  * and preset metadata documents carry names that are not module specifiers;
  * only names with a scope or a path separator count.
  * @param rows - Parsed YAML value; anything but an entry array is ignored.
@@ -164,6 +167,9 @@ function moduleNamesOf(rows: unknown, names: Set<string>): void {
       names.add(packageNameOf(name))
     }
     moduleNamesOf(config, names)
+    if (typeof config === 'object' && config !== null && !Array.isArray(config)) {
+      moduleNamesOf((config as { plugins?: unknown }).plugins, names)
+    }
   }
 }
 
@@ -385,6 +391,9 @@ function sweepImage(
 
   const queue: { specifier: string; from: string; importer: string; meta?: boolean; exportRoot?: boolean }[] =
     (options.entries ?? IMAGE_ENTRY_SEEDS).map(specifier => ({ specifier, from: root, importer: 'worker assembly entry' }))
+  for (const key of Object.keys(files)) {
+    if (dynamicModule(key)) queue.push({ specifier: `${root}/${key}`, from: root, importer: 'computed-path module' })
+  }
   for (const name of rootPackages) {
     const manifestBytes = files[`node_modules/${name}/package.json`]
     if (manifestBytes === undefined) continue // materialize already reported it under `missing`

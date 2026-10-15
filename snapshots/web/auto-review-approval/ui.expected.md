@@ -2,6 +2,7 @@
 
 - banner:
   - navigation "Session hierarchy": {{workspace}}
+  - button "Stop all"
   - button "More actions"
   - button "Open right sidebar"
   - tablist:
@@ -9,6 +10,8 @@
     - tab "Trajectory"
 - text: Clean up the stale build log. {{clock}}
 - button "Copy"
+- button "Edit and resend"
+- button "Resend"
 - status: Completed
 - button "Completed in {{duration}}" [expanded]
 - button "Called tools" [expanded]
@@ -16,7 +19,7 @@
 - 'button "Tool call Error: the user rejected tool \"mystery\""'
 - text: Failed
 - 'button "Tool call Error: Auto review of tool \"mystery\" failed; its body was not executed: auto-review: reviewer ended with error UNKNOWN: provider unavailable"'
-- textbox "Message or run a task, / commands, @ files or sessions"
+- textbox "Keep going, or drop in papers and data; / for commands, @ for files or conversations"
 - button "Add files or run commands"
 - 'button "Access mode, current: Auto review EXP"':
   - text: Auto review
@@ -29,6 +32,7 @@
 
 - banner:
   - navigation "Session hierarchy": {{workspace}}
+  - button "Stop all"
   - button "More actions"
   - button "Open right sidebar"
   - tablist:
@@ -36,6 +40,8 @@
     - tab "Trajectory"
 - text: Clean up the stale build log. {{clock}}
 - button "Copy"
+- button "Edit and resend"
+- button "Resend"
 - status: Completed
 - button "Completed in {{duration}}" [expanded]
 - button "Called tools" [expanded]
@@ -47,7 +53,7 @@
 - 'button "Tool call Error: Auto review of tool \"mystery\" failed; its body was not executed: auto-review: reviewer ended with error UNKNOWN: provider unavailable" [expanded]'
 - text: "IN { \"target\": \"notes.txt\" } OUT Error: Auto review of tool \"mystery\" failed; its body was not executed: auto-review: reviewer ended with error UNKNOWN: provider unavailable"
 - button "Inspect"
-- textbox "Message or run a task, / commands, @ files or sessions"
+- textbox "Keep going, or drop in papers and data; / for commands, @ for files or conversations"
 - button "Add files or run commands"
 - 'button "Access mode, current: Auto review EXP"':
   - text: Auto review

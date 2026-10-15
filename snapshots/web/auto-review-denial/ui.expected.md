@@ -2,6 +2,7 @@
 
 - banner:
   - navigation "Session hierarchy": {{workspace}}
+  - button "Stop all"
   - button "More actions"
   - button "Open right sidebar"
   - tablist:
@@ -9,6 +10,8 @@
     - tab "Trajectory"
 - text: Inspect the protected operation, but do not run it unless authorized. {{clock}}
 - button "Copy"
+- button "Edit and resend"
+- button "Resend"
 - status: Completed
 - button "Completed in {{duration}}" [expanded]
 - button "Called tools, ran code, ran commands" [expanded]
@@ -17,7 +20,7 @@
 - button "Code Catch an Auto-denied inner call"
 - text: Failed
 - button "Bash Rejected by Auto review"
-- textbox "Message or run a task, / commands, @ files or sessions"
+- textbox "Keep going, or drop in papers and data; / for commands, @ for files or conversations"
 - button "Add files or run commands"
 - 'button "Access mode, current: Auto review EXP"':
   - text: Auto review
@@ -30,6 +33,7 @@
 
 - banner:
   - navigation "Session hierarchy": {{workspace}}
+  - button "Stop all"
   - button "More actions"
   - button "Open right sidebar"
   - tablist:
@@ -37,6 +41,8 @@
     - tab "Trajectory"
 - text: Inspect the protected operation, but do not run it unless authorized. {{clock}}
 - button "Copy"
+- button "Edit and resend"
+- button "Resend"
 - status: Completed
 - button "Completed in {{duration}}" [expanded]
 - button "Called tools, ran code, ran commands" [expanded]
@@ -49,7 +55,7 @@
 - button "Bash Rejected by Auto review" [expanded]
 - text: "OUT Tool was not executed. Reason: ptc raw reason"
 - button "Inspect"
-- textbox "Message or run a task, / commands, @ files or sessions"
+- textbox "Keep going, or drop in papers and data; / for commands, @ for files or conversations"
 - button "Add files or run commands"
 - 'button "Access mode, current: Auto review EXP"':
   - text: Auto review
@@ -62,6 +68,7 @@
 
 - banner:
   - navigation "Session hierarchy": {{workspace}}
+  - button "Stop all"
   - button "More actions"
   - button "Open right sidebar"
   - tablist:
@@ -71,6 +78,10 @@
   - button "Use actual duration": Duration
   - button "Collapse turns": Turns
   - button "Collapse calls": Calls
+  - group "Session log":
+    - text: Log ID auto-rev
+    - button "Copy log ID"
+    - button "Export log"
   - searchbox "Search trajectory"
 - region "Trajectory timeline"
 - table:
@@ -108,7 +119,7 @@
     - tab "Schema"
     - tab "Timing"
   - tabpanel "Result": "AutoReviewDeniedError: AUTO_REVIEW_DENIED Error: Auto review rejected tool \"bash\"; its body was not executed"
-- textbox "Message or run a task, / commands, @ files or sessions"
+- textbox "Keep going, or drop in papers and data; / for commands, @ for files or conversations"
 - button "Add files or run commands"
 - 'button "Access mode, current: Auto review EXP"':
   - text: Auto review

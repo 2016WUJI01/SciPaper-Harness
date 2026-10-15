@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { expect, it, type TestContext } from 'vitest'
+import { MemoryVfs, WorkerModuleLoader } from '@deepseek-ai/dsh-experimental-webworker-runtime'
 import { packVfsImage, type PackOptions } from '../src/pack.ts'
 
 const SUBJECT = '@deepseek-ai/dsh-image-export-fixture'
@@ -90,4 +91,46 @@ it('preserves SSH process bytes and rejects importing them as a Worker module', 
   expect(result.transform.visited).toBe(1)
   writeFileSync(join(root, 'lib/index.js'), "import '@deepseek-ai/dsh-ssh/helper'")
   expect(() => packVfsImage(input)).toThrow('standalone process asset, not a Worker module')
+})
+
+it('packs plugins nested inside an agent preset and its groups', (test) => {
+  const options = fixture(test, { default: './lib/contract.js' })
+  const config = `- name: cordis:group
+  config:
+    - id: preset
+      config:
+        id: research
+        plugins:
+          - name: cordis:group
+            config:
+              - name: '${SUBJECT}'
+                config: { name: 'A display label' }
+`
+  const result = packVfsImage({ ...options, config })
+  expect(result.roster).toEqual([SUBJECT])
+  expect(result.missing).toEqual([])
+  expect(Object.keys(result.files)).toContain(`node_modules/${SUBJECT}/lib/index.js`)
+})
+
+it('retains and lowers a computed-path module with its runtime dependencies', async (test) => {
+  const options = fixture(test, { default: './lib/contract.js' })
+  const name = '@deepseek-ai/dsh-tool-web'
+  const directory = options.resolveFrom
+  mkdirSync(join(directory, 'assets'))
+  writeFileSync(join(directory, 'package.json'), JSON.stringify({
+    name, type: 'module', files: ['lib', 'assets'], exports: { '.': './lib/index.js' },
+  }))
+  writeFileSync(join(directory, 'assets/html-converter.cjs'),
+    "const value = require('./value.cjs'); module.exports = async () => value")
+  writeFileSync(join(directory, 'assets/value.cjs'), 'module.exports = 42')
+  const root = '/custom-preview'
+  const result = packVfsImage({ ...options, root, config: `- name: '${name}'\n`, workspaces: new Map([[name, directory]]) })
+  expect(result.missing).toEqual([])
+  const vfs = new MemoryVfs()
+  for (const [path, bytes] of Object.entries(result.files)) {
+    if (!path.endsWith('/')) vfs.seed(`${root}/${path}`, bytes)
+  }
+  const loader = new WorkerModuleLoader({ vfs, root, staticModules: {} })
+  const convert = loader.requireFrom(root)(`${root}/node_modules/${name}/assets/html-converter.cjs`) as () => Promise<number>
+  expect(await convert()).toBe(42)
 })

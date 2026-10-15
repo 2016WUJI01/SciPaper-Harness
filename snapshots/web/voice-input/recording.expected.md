@@ -1,4 +1,4 @@
-- textbox "Describe what you want to build, / commands, @ files or sessions":
+- textbox "Describe your research question, or drop in papers and data; / for commands, @ for files or conversations":
   - paragraph: Use the bash tool to
 - button "Cancel"
 - img "Recording…"

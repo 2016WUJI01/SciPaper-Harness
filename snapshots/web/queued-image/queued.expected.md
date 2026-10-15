@@ -1,6 +1,7 @@
 - banner:
   - navigation "Session hierarchy": Reply with a one-sentence description
   - text: Standard mode
+  - button "Stop all"
   - button "More actions"
   - button "Open right sidebar"
   - tablist:
@@ -8,6 +9,8 @@
     - tab "Trajectory"
 - text: Reply with a one-sentence description of event sourcing, then stop. {{clock}}
 - button "Copy"
+- button "Edit and resend" [disabled]
+- button "Resend" [disabled]
 - paragraph: partial
 - status: Deep diving
 - text: Deep diving for {{duration}} ···

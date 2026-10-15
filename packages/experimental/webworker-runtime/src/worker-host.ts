@@ -417,6 +417,11 @@ function bootPatches(
   if (jsonl !== undefined) {
     patches.push({ id: 'session-persistence-jsonl', config: { ...configOf(jsonl), compression: 'none' } })
   }
+  // The in-browser VFS has no native child processes. The capability registries
+  // remain available; desktop language servers and browser drivers cannot start here.
+  for (const id of ['lsp-stdio', 'browser-use-playwright']) {
+    if (find(rows, id) !== undefined) patches.push({ id, disabled: true })
+  }
   const dir = join(root, IMAGE_HOME_DIRECTORY, 'profiles/preview')
   const profile: ProfileContext = {
     name: 'preview', dir, patchPath: join(dir, 'cordis.patch.yml'),

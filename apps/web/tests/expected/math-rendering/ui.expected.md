@@ -1,5 +1,6 @@
 - banner:
   - navigation "Session hierarchy": Math rendering
+  - button "Stop all"
   - button "More actions"
   - button "Open right sidebar"
   - tablist:
@@ -7,6 +8,8 @@
     - tab "Trajectory"
 - text: Render this mathematical proof. {{clock}}
 - button "Copy"
+- button "Edit and resend"
+- button "Resend"
 - status: Completed
 - button "Completed in {{duration}}" [disabled]
 - heading "Math rendering" [level=2]
@@ -35,7 +38,7 @@
 - button "Bad response"
 - button "Continue from here"
 - text: {{clock}}
-- textbox "Message or run a task, / commands, @ files or sessions"
+- textbox "Keep going, or drop in papers and data; / for commands, @ for files or conversations"
 - button "Add files or run commands"
 - 'button "Access mode, current: Workspace Write"': Workspace Write
 - button "Select model, current DeepSeek-V4-Flash": DeepSeek-V4-Flash

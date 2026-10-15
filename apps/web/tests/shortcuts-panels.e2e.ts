@@ -169,7 +169,7 @@ describe.skipIf(process.platform === 'win32')('Web sidebar shortcuts', () => {
       await panel.locator('[data-dockkit-tab-close]').last().click()
       await panel.locator('[data-dockkit-tab-close]').click()
       await page.getByRole('button', { name: 'Open right sidebar', exact: true }).click()
-      await bind(page, primary, 'Workspace files', 'Browser')
+      await bind(page, primary, 'Research files', 'Browser')
       await composer.click()
       await page.keyboard.press(`${primary}+Shift+,`)
       await panel.locator('[data-dockkit-tab]').filter({ hasText: 'Files' }).waitFor()
@@ -180,7 +180,7 @@ describe.skipIf(process.platform === 'win32')('Web sidebar shortcuts', () => {
       expect(await panel.locator('[data-dockkit-pane]').evaluate(pane => document.activeElement === pane)).toBe(true)
       expect(await paneAppearance()).toEqual([plainPane])
 
-      await bind(page, primary, 'Toggle panel fullscreen', 'Workspace files')
+      await bind(page, primary, 'Toggle panel fullscreen', 'Research files')
       await composer.click()
       await page.keyboard.press(`${primary}+Shift+,`)
       expect(await page.locator('[data-sidebar-right-panel="fullscreen"]').count()).toBe(0)
