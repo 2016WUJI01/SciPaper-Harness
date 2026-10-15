@@ -29,6 +29,7 @@ interface SessionSummary {
 interface WorkspaceView {
   readonly workspaceId: string
   readonly path: string
+  readonly location: { readonly kind: 'local'; readonly path: string }
   readonly title: string
   sessionIds: string[]
   readonly createdAt: string
@@ -242,6 +243,7 @@ export function createAssembledRemote(options: AssembledRemoteOptions = {}): Ass
     const workspace = {
       workspaceId: `fx-ws-${String(workspaces.length + 1)}`,
       path,
+      location: { kind: 'local' as const, path },
       title: path.split('/').filter(Boolean).at(-1) ?? path,
       sessionIds: [],
       createdAt: now,

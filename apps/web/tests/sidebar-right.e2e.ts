@@ -905,7 +905,7 @@ describe('web e2e: shipped right Sidebar', () => {
 
         // The real New Session action selects a distinct blank Session; its
         // collapsed surface must not inherit the settled Session's tabs.
-        await fx.getByRole('button', { name: 'New session', exact: true }).last().click()
+        await fx.getByRole('button', { name: 'New conversation', exact: true }).last().click()
         await expect.poll(async () => await settled.getAttribute('aria-selected')).toBe('false')
         await expect.poll(async () => await frame.getAttribute('data-rightbar-collapsed')).toBe('true')
         expect(await column.locator('[data-sidebar-right-open]').count()).toBe(0)
@@ -1168,7 +1168,7 @@ describe('web e2e: shipped right Sidebar', () => {
         expect(await width(column)).toBeGreaterThan(300)
         await expect.poll(async () => await tabTitles(column)).toEqual(['文件', '开始'])
         await expect.poll(async () => await guide.locator('[data-sidebar-right-guide-entry="files"]').innerText())
-          .toBe('工作区文件\n浏览会话工作区的文件\n⌥\n⌘\nP')
+          .toBe('研究文件\n浏览这项研究的文件夹\n⌥\n⌘\nP')
         const fileEntry = guide.locator('[data-sidebar-right-guide-entry="files"]')
         const terminalEntry = guide.locator('[data-sidebar-right-guide-entry="terminal"]')
         for (const entry of [fileEntry, terminalEntry]) {

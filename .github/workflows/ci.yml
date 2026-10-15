@@ -359,6 +359,17 @@ jobs:
       - name: Build and execute the Linux Office runtime
         run: CI=true pnpm run prepare:primary-runtime --target linux-x64 --output "$RUNNER_TEMP/office-runtime" --cache "$RUNNER_TEMP/office-runtime-downloads"
 
+      - uses: actions/setup-python@v6.3.0
+        with:
+          python-version: '3.12'
+
+      - name: Prepare research browser Python
+        run: |
+          python -m venv "$RUNNER_TEMP/research-browser-python"
+          export DSH_RESEARCH_TEST_PYTHON="$RUNNER_TEMP/research-browser-python/bin/python"
+          pnpm exec tsx -e 'import { execFileSync } from "node:child_process"; import { PLATFORM_PYTHON_PACKAGES } from "./packages/research/workbench/src/components.ts"; execFileSync(process.env.DSH_RESEARCH_TEST_PYTHON!, ["-m", "pip", "install", ...PLATFORM_PYTHON_PACKAGES], { stdio: "inherit" })'
+          echo "DSH_RESEARCH_TEST_PYTHON=$DSH_RESEARCH_TEST_PYTHON" >> "$GITHUB_ENV"
+
       - name: Run compatibility, snapshot, and artifact gates
         run: pnpm run check:ci:consumers
 

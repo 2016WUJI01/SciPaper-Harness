@@ -1,0 +1,69 @@
+name: Browser fixture validation
+
+on:
+  push:
+    branches: [fix/welcome-startup-app-once]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: browser-fixture-validation-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  browser:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      DSH_TELEMETRY_DISABLED: '1'
+      DSH_SNAPSHOT: refresh
+      PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/ms-playwright
+      TMPDIR: ${{ runner.temp }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: pnpm
+      - uses: actions/setup-python@v6.3.0
+        with:
+          python-version: '3.12'
+      - run: pnpm install --frozen-lockfile
+      - run: bash scripts/prepare-ci-bubblewrap.sh
+      - run: pnpm exec playwright install --with-deps chromium webkit
+      - name: Prepare research Python
+        run: |
+          python -m venv "$RUNNER_TEMP/research-browser-python"
+          export DSH_RESEARCH_TEST_PYTHON="$RUNNER_TEMP/research-browser-python/bin/python"
+          pnpm exec tsx -e 'import { execFileSync } from "node:child_process"; import { PLATFORM_PYTHON_PACKAGES } from "./packages/research/workbench/src/components.ts"; execFileSync(process.env.DSH_RESEARCH_TEST_PYTHON!, ["-m", "pip", "install", ...PLATFORM_PYTHON_PACKAGES], { stdio: "inherit" })'
+          echo "DSH_RESEARCH_TEST_PYTHON=$DSH_RESEARCH_TEST_PYTHON" >> "$GITHUB_ENV"
+      - run: pnpm run build:official
+      - name: Validate serial browser owners
+        run: |
+          pnpm run test:web:built apps/web/tests/hmr-live.e2e.ts
+          pnpm run test:web:built apps/web/tests/client-plugin-live.e2e.ts
+      - name: Refresh browser fixtures for review
+        run: >-
+          pnpm run test:web:built
+          --exclude=apps/web/tests/hmr-live.e2e.ts
+          --exclude=apps/web/tests/client-plugin-live.e2e.ts
+          --fileParallelism --maxWorkers=4
+          --reporter=default --reporter=json
+          --outputFile.json=.artifacts/browser-results.json
+      - name: Capture fixture changes
+        if: always()
+        run: |
+          git add -N -- apps/web/tests snapshots/web
+          git diff --binary -- apps/web/tests snapshots/web > "$RUNNER_TEMP/browser-fixtures.patch"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: browser-fixtures-${{ github.sha }}
+          include-hidden-files: true
+          path: |
+            ${{ runner.temp }}/browser-fixtures.patch
+            .artifacts/browser-results.json

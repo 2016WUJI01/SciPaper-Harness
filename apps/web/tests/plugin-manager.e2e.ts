@@ -94,7 +94,7 @@ describe('web e2e: plugin manager', () => {
     return readFile(join(scaffold.harnessHome, ...segments), 'utf8').catch(() => '')
   }
 
-  it('aligns the first-read skeleton with the loaded plugin cards', async () => {
+  it('matches the first-read skeleton to the loaded plugin card geometry', async () => {
     const facts: string[] = []
     let aria = ''
     const shots = MODE === 'refresh' ? await mkdtemp(join(tmpdir(), 'dsh-plugin-loading-')) : undefined
@@ -132,13 +132,16 @@ describe('web e2e: plugin manager', () => {
         else expect(loadingAria).toBe(aria)
 
         const measure = (group: Locator) => group.evaluate((element) => {
-          const rect = (node: Element | null | undefined) => {
+          // Research plugins can precede Official after loading. Compare card
+          // geometry within each group, while the page header stays in place.
+          const top = element.getBoundingClientRect().y
+          const rect = (node: Element | null | undefined, origin = top) => {
             if (node === null || node === undefined) throw new Error('Missing plugin layout element')
             const { x, y, width, height } = node.getBoundingClientRect()
-            return { x, y, width, height }
+            return { x, y: y - origin, width, height }
           }
           return {
-            pageHeader: rect(element.closest('[data-plugin-panel]')?.querySelector(':scope > header')),
+            pageHeader: rect(element.closest('[data-plugin-panel]')?.querySelector(':scope > header'), 0),
             groupHeader: rect(element.firstElementChild),
             rows: Array.from(element.querySelectorAll(':scope > ul > li')).slice(0, 4).map((row) => {
               const head = row.firstElementChild
@@ -199,7 +202,7 @@ describe('web e2e: plugin manager', () => {
           // Painted text bars are deliberately shorter than real copy; their line origins and heights align.
           for (const part of ['title', 'description'] as const) compare(`row ${index + 1} ${part}`, row[part], real[part], ['x', 'y', 'height'])
         }
-        facts.push(`${width}px: 4 rows; page/group headers, rows, icons, text lines and blank action spaces align within 0.1px`)
+        facts.push(`${width}px: 4 rows; page header stays fixed; group headers, rows, icons, text lines and blank action spaces align within their group within 0.1px`)
         expect(consoleWatch.pageErrors).toEqual([])
       } finally {
         release.resolve(undefined)
@@ -433,7 +436,10 @@ describe('web e2e: plugin manager', () => {
     // optional bundles open the Official group, followed by the official plugins that registered their
     // configuration, and its other bundles stay off the page.
     expect(await panel.locator('[data-plugin-group="bundles"] [data-plugin-package]').count()).toBe(2)
-    expect(await panel.locator('[data-plugin-group="official"] [data-plugin-package]').count()).toBe(OPTIONAL_BUNDLES.length)
+    expect(await panel.locator('[data-plugin-group="official"] [data-plugin-package]').count())
+      .toBe(OPTIONAL_BUNDLES.filter(name => !name.startsWith('@deepseek-ai/dsh-research-')).length)
+    expect(await panel.locator('[data-plugin-group="research"] [data-plugin-package]').count())
+      .toBe(OPTIONAL_BUNDLES.filter(name => name.startsWith('@deepseek-ai/dsh-research-')).length)
     expect(await panel.locator('[data-plugin-group="official"] [data-plugin-item]').count()).toBe(4)
     expect(await panel.getByText('实验性', { exact: true }).count())
       .toBe(OPTIONAL_BUNDLES.filter(name => name.startsWith('@deepseek-ai/dsh-experimental-')).length)

@@ -127,6 +127,7 @@ describe.skipIf(mode === 'record')('web e2e: workspace shortcuts', () => {
 
     await bind('Add workspace')
     await page.keyboard.press('Meta+Shift+Comma')
+    await page.getByRole('menuitem', { name: 'Add workspace…', exact: true }).click()
     const picker = page.getByRole('dialog', { name: 'Select Workspace Directory', exact: true })
     await picker.waitFor()
     await page.keyboard.press('Meta+Shift+Comma')

@@ -52,6 +52,7 @@ describe('web e2e: workspace management (create / rename / grouping / hover affo
    */
   async function browseTo(path: string): Promise<Locator> {
     await page.getByRole('button', { name: 'Add workspace' }).click()
+    await page.getByRole('menuitem', { name: 'Add workspace…', exact: true }).click()
     const dialog = page.getByRole('dialog', { name: 'Select Workspace Directory' })
     await dialog.waitFor({ timeout: 10_000 })
     await dialog.getByRole('button', { name: 'Edit path' }).click()
@@ -791,7 +792,7 @@ describe('web e2e: New Session after an outdated blank cache', () => {
       const previous = (await selected.innerText()).split('\n')[0]!
       const before = await captureStableAria(page, '[role="tree"]', scaffold.workspaceCwd)
 
-      await page.getByRole('button', { name: 'New session', exact: true }).last().click()
+      await page.getByRole('button', { name: 'New conversation', exact: true }).last().click()
       await expect.poll(() => selected.innerText()).toBe('New Session')
       await page.getByRole('tab', { name: 'Chat', exact: true }).waitFor({ state: 'hidden' })
       await expect.poll(() => workspace.sessionIds.length).toBe(2)

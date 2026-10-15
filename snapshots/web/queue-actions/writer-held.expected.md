@@ -1,5 +1,5 @@
 - alert: This session is already in use, possibly by another running SciPaper Harness instance (such as the desktop app or one started from the command line). Quit other running instances and try again.
-- textbox "Message or run a task, / commands, @ files or sessions":
+- textbox "Keep going, or drop in papers and data; / for commands, @ for files or conversations":
   - paragraph: Queue submission to retry
 - button "Add files or run commands"
 - 'button "Access mode, current: Workspace Write"': Workspace Write

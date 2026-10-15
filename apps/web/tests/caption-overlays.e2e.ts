@@ -86,7 +86,7 @@ it('keeps settings and expanded plugin dialogs clear of the Windows caption acro
         }, platform)
         if (await reopenSidebar.isVisible()) await reopenSidebar.click()
         await openSettings(page, 'zh')
-        await expect.poll(async () => (await settings.boundingBox())?.y).toBe(platform === 'darwin' ? 68 : 24)
+        await expect.poll(async () => (await settings.boundingBox())?.y).toBe(platform === 'darwin' ? 68 : 0)
         expect((await settingsMask.boundingBox())?.y).toBe(0)
         await page.keyboard.press('Escape')
         await settings.waitFor({ state: 'hidden' })

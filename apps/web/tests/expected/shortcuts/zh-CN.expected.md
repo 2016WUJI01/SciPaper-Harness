@@ -37,8 +37,8 @@
         - button "修改展开／收起右侧栏快捷键"
         - text: 展开／收起右侧栏 ⇧ ⌘ B
       - listitem:
-        - button "修改工作区文件快捷键"
-        - text: 工作区文件 ⌥ ⌘ P
+        - button "修改研究文件快捷键"
+        - text: 研究文件 ⌥ ⌘ P
       - listitem:
         - button "修改新建终端快捷键"
         - text: "新建终端 ⌃ `"

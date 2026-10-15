@@ -36,7 +36,7 @@ describe.skipIf(MODE === 'record')('web e2e: default Workspace', () => {
         await input.waitFor()
         // Language-neutral on disk, localized in the hero chip. The chip's
         // aria-label is its fixed call to action, so the label is its text.
-        await expect.poll(() => page.getByRole('button', { name: 'Choose workspace', exact: true }).textContent())
+        await expect.poll(() => page.getByRole('button', { name: 'Choose project', exact: true }).textContent())
           .toBe('Default workspace')
         expect(scaffold.ctx.workspaceRegistry.list()).toHaveLength(1)
         const initialSession = scaffold.ctx.sessions.list()[0]!
@@ -93,7 +93,8 @@ describe.skipIf(MODE === 'record')('web e2e: default Workspace', () => {
         await compareOrRefreshGolden(FAILURE_EXPECTED, await notice.ariaSnapshot(), MODE)
         expect(await page.getByRole('dialog').count()).toBe(0)
         expect(await input.count()).toBe(0)
-        await page.getByRole('button', { name: '选择工作区', exact: true }).click()
+        await page.getByRole('button', { name: '选择项目', exact: true }).click()
+        await page.getByRole('menuitem', { name: '添加工作区…', exact: true }).click()
         const picker = page.getByRole('dialog', { name: '选择工作区目录' })
         await picker.waitFor()
         await picker.getByRole('button', { name: '编辑路径', exact: true }).click()
@@ -128,7 +129,7 @@ describe.skipIf(MODE === 'record')('web e2e: default Workspace', () => {
       const attempted = page.waitForResponse(response => response.url().includes('/api/workspace/initializeDefault'))
       await page.goto(scaffold.authenticatedUrl)
       expect((await attempted).ok()).toBe(true)
-      await page.getByRole('button', { name: 'Choose workspace', exact: true }).waitFor()
+      await page.getByRole('button', { name: 'Choose project', exact: true }).waitFor()
       expect(await page.getByRole('alert').filter({ hasText: 'Unable to create default workspace' }).count()).toBe(0)
       expect(await page.locator('[data-composer-input][contenteditable="true"]').count()).toBe(0)
       expect(scaffold.ctx.workspaceRegistry.list()).toEqual([])

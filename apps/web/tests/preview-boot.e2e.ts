@@ -522,10 +522,9 @@ async function bootEmptyPreview(origin: string, browser: Browser): Promise<void>
     })
     expect(sessionCount).toBe(0)
     expect(pageErrors.map(error => error.message)).toEqual([])
-    // One accepted static-host 404: the HMR event stream has no server here.
-    // The research edition composes no Open In surface, so nothing reads the
-    // open-in-app availability route.
-    expect([...failedResponses].sort()).toEqual(['/plugins/events'])
+    // The packed base Web image includes Open In, but this static preview has
+    // neither native-app discovery nor the development HMR event stream.
+    expect([...failedResponses].sort()).toEqual(['/open-in-app/apps', '/plugins/events'])
     expect(consoleErrors.filter(line => !line.includes('Failed to load resource: the server responded with a status of 404')))
       .toEqual([])
   } catch (error) {

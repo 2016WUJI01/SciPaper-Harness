@@ -1,6 +1,7 @@
 - banner:
   - navigation "Session hierarchy": Reply with a one-sentence description
   - text: Standard mode
+  - button "Stop all"
   - button "More actions"
   - button "Open right sidebar"
   - tablist:
@@ -8,6 +9,8 @@
     - tab "Trajectory"
 - text: Reply with a one-sentence description of event sourcing, then stop. {{clock}}
 - button "Copy"
+- button "Edit and resend" [disabled]
+- button "Resend" [disabled]
 - paragraph: partial
 - status: Deep diving
 - text: Deep diving for {{duration}} ···
@@ -18,7 +21,7 @@
     - button "Edit queued message" [disabled]
     - button "Remove queued message" [disabled]
     - button "Steer queued message" [disabled]
-- textbox "Message or run a task, / commands, @ files or sessions"
+- textbox "Keep going, or drop in papers and data; / for commands, @ for files or conversations"
 - button "Add files or run commands"
 - 'button "Access mode, current: Workspace Write"': Workspace Write
 - button "Select model, current DeepSeek-V4-Flash": DeepSeek-V4-Flash

@@ -485,6 +485,7 @@ const EXPECTED_TOOLS = [
   'job_kill',
   'job_list',
   'job_output',
+  'job_stop_all',
   'list_agents',
   'present',
   'read',

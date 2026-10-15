@@ -139,6 +139,9 @@ function pinSystemZone(timeZone: string): void {
 // the open clock panel calls to bring the staged value into view.
 /** Device zone the cases pin: a rule without a stored zone seeds its clock in it. */
 const DEVICE_ZONE = 'Asia/Shanghai'
+// Pinning resolvedOptions below changes menu labels, not Intl's actual
+// default formatting zone. Cross-zone rendering cases must use the latter.
+const FORMATTING_ZONE = Intl.DateTimeFormat().resolvedOptions().timeZone
 /** Elements whose `scrollIntoView` the open pickers called, in call order. */
 const scrolledIntoView: Element[] = []
 const scrollIntoView = vi.fn(function (this: Element) { scrolledIntoView.push(this) })
@@ -1570,11 +1573,12 @@ describe('Task manager details', () => {
   })
 
   it('states the next run in the device zone even when the rule stores another one', () => {
-    const stored: ScheduleCatalogEntry = { ...daily, timeZone: 'America/New_York' }
+    const zone = zoneDifferingFrom(daily.scheduledAt, FORMATTING_ZONE)
+    const stored: ScheduleCatalogEntry = { ...daily, timeZone: zone }
     mount({ records: [stored] })
     const locale = en['time.locale']
     const ruleZone = new Intl.DateTimeFormat(locale, {
-      timeZone: 'America/New_York', month: 'short', day: 'numeric', year: 'numeric',
+      timeZone: zone, month: 'short', day: 'numeric', year: 'numeric',
       hour: '2-digit', minute: '2-digit', hour12: false,
     }).format(Date.parse(stored.scheduledAt))
     const device = absoluteNextRun(stored.scheduledAt, en)
@@ -1586,7 +1590,7 @@ describe('Task manager details', () => {
     const detail = screen.getByRole('complementary', { name: en['detail.label'] })
     expect(nextRunTime(detail)?.textContent).toBe(device)
     // The rule keeps stating its own zone where the zone belongs.
-    expect(zoneButton().textContent).toContain(displayedZone('America/New_York'))
+    expect(zoneButton().textContent).toContain(displayedZone(zone))
   })
 
   /**
@@ -3350,7 +3354,7 @@ describe('Task detail rule header and run-time card', () => {
   })
 
   it('renders a saved record time in the task zone rather than the browser zone', async () => {
-    const zone = taskZone(delivery.scheduledAt)
+    const zone = zoneDifferingFrom(delivery.scheduledAt, FORMATTING_ZONE)
     const stored: ScheduleCatalogEntry = { ...daily, timeZone: zone, lastDelivery: delivery }
     mount({ records: [stored] })
     fireEvent.click(screen.getByRole('button', { name: 'Daily weather' }))
@@ -3361,7 +3365,7 @@ describe('Task detail rule header and run-time card', () => {
     // Precondition: the two zones hold different offsets at this instant, so the
     // task-zone render cannot coincide with the browser-zone render.
     expect(zoneOffsetMinutes(zone, delivery.scheduledAt))
-      .not.toBe(zoneOffsetMinutes(Intl.DateTimeFormat().resolvedOptions().timeZone, delivery.scheduledAt))
+      .not.toBe(zoneOffsetMinutes(FORMATTING_ZONE, delivery.scheduledAt))
     const rendered = formatScheduleNextRun(delivery.scheduledAt, en['time.locale'], zone)
     expect(occurrence?.textContent).toBe(rendered)
     expect(rendered).not.toBe(formatScheduleNextRun(delivery.scheduledAt, en['time.locale']))
